@@ -1,6 +1,6 @@
 # PROJEKT.md – Sport-Tracker (Arbeitstitel „sport")
 
-Version: 0.2.1 (2026-11-17) – v0.2 läuft, v0.3 in Planung
+Version: 0.3.0 (2026-11-17) – v0.3 Web-App und App gebaut, Einrichtung offen
 
 Dieses Dokument ist die Grundlage für die Entwicklung mit Claude Code. Es beschreibt Ziele, Architektur, Arbeitsweise und Fahrplan. Claude Code liest es vor jeder Arbeit und hält es aktuell.
 
@@ -109,7 +109,10 @@ Epix / Tacho → Garmin Connect (unverändert)
 - **Keine Aktivitäts- oder GPS-Daten im Repo.** Das Repo und GitHub Pages sind öffentlich.
 - **FIT-Auswertung in Apps Script** (entschieden nach Diagnose 0.1.1): Die GPS-Spur steckt nur in der FIT-Datei. Der eigene FIT-Scanner liest sie in Millisekunden. Keine GitHub Action nötig, die Daten verlassen Google nicht.
 - **Woche beginnt am Montag.**
-- **Wochenziel Läufe** wird in der App unter Einstellungen festgelegt, Standard 2 pro Woche.
+- **Wochenziel Läufe** wird in der App unter Einstellungen festgelegt, Standard 2 pro Woche. Gespeichert im Sheet „Konfiguration“, damit es auf allen Geräten gilt.
+- **Die App rechnet** (entschieden 2026-11-17): Die Web-App liefert die ganze Aktivitätsliste kompakt (ca. 2700 Zeilen). Woche, Laufziel, Serie und später der Verlauf werden in der App berechnet. Die App speichert die letzten Daten im localStorage und zeigt sie sofort und offline.
+- **Wochen-Serie:** Wochen in Folge mit erreichtem Laufziel. Die laufende Woche zählt mit, sobald das Ziel erreicht ist, und bricht die Serie nicht, solange sie offen ist. Rückwirkend gilt das aktuelle Wochenziel.
+- **App ohne Build-Schritt:** schlichtes HTML/CSS/JavaScript in `/docs`, GitHub Pages veröffentlicht direkt.
 - **Deployment per GitHub Action schon ab v0.1** (statt erst v0.2). Die Skript-ID steht als Repo-Variable `GAS_SCRIPT_ID`, die Action erzeugt daraus `gas/.clasp.json`. clasp-Version fest: `@google/clasp@3.4.1`.
 - **Diagnose-Protokolle ohne Werte:** Die Diagnose loggt standardmäßig nur Struktur und Zählungen (`WERTE_LOGGEN = false`), damit das Protokoll keine Aktivitätsdaten enthält.
 - **Historie:** Die API reicht bis 2012 zurück. Ein Import aus dem Garmin-Datenexport ist nicht nötig. Der erste Lauf des Sammlers holt die ganze Historie.
@@ -186,12 +189,22 @@ Laufband-Läufe zählen fürs Laufziel. Indoor-Fahrten zählen zu Rad, haben abe
 
 ---
 
-## 5. Schnittstelle der Web-App (Entwurf)
+## 5. Schnittstelle der Web-App
 
-`GET <webapp-url>?token=<WEBAPP_TOKEN>&aktion=<aktion>&...`
+`GET <webapp-url>?token=<WEBAPP_TOKEN>&aktion=<aktion>&...` (Code: `gas/WebApp.gs`)
 
 | aktion | Liefert |
 |---|---|
+| `aktivitaeten` | alle Aktivitäten kompakt: `spalten` = `id, start, sportart, typ, name, km, min, minGesamt, hm, puls, gps`, `zeilen` = Liste von Listen. `start` als lokale Zeit `YYYY-MM-DDTHH:mm` |
+| `einstellungen` | `einstellungen` aus dem Blatt „Konfiguration“, fehlende werden mit Standardwert angelegt |
+| `einstellungSetzen` | ändert `schluessel` auf `wert` (nur bekannte Schlüssel, geprüft), liefert alle Einstellungen |
+| `status` | `letzterImport`, `letzterImportNeu`, `letzterFehler`, `anzahlAktivitaeten` |
+| `spuren`, `spur` | ab v0.5 |
+
+Antwort immer JSON: `{ok: true, version, …}` oder `{ok: false, fehler}`. Ohne gültiges Token: `{ok: false, fehler: "nicht berechtigt"}`.
+Die Web-App läuft als Christof („Ausführen als: Ich“) mit Zugriff „Jeder“; geschützt ist sie allein durch das Token.
+
+---|---|
 | `aktivitaeten` | Liste, optional `von`, `bis`, `sportart` |
 | `woche` | Summen der aktuellen Woche und Stand des Laufziels |
 | `verlauf` | Summen pro Woche/Monat/Jahr |
@@ -213,7 +226,8 @@ Antwort immer JSON. Endgültig festgelegt in v0.2.
 /gas/Hilfen.gs                  allgemeine Hilfsfunktionen
 /gas/Diagnose.gs                Diagnose der Garmin-API (nur Logs)
 /gas/Sammler.gs                 v0.2: Sammler, Sheet, Zeitgeber, Fehler-Mail
-/docs/  oder /                  PWA (index.html, app.js, style.css, manifest.json, sw.js), ab v0.3
+/gas/WebApp.gs                  v0.3: Schnittstelle für die App (doGet)
+/docs/                          App auf GitHub Pages: index.html, app.js, style.css, sw.js, manifest.json, icons/
 /.github/workflows/deploy-gas.yml  Deployment nach Apps Script per clasp
 ```
 
@@ -252,11 +266,14 @@ Für v0.2 (im Script-Editor, jeweils Funktion auswählen und „Ausführen“; n
 3. `zeitgeberEinrichten`: ab dann läuft `sammeln` täglich zwischen 3 und 4 Uhr.
 4. `statusZeigen`: zeigt jederzeit letzten Import, letzten Fehler, Sheet-Link und Zeitgeber.
 
-Später:
+Für v0.3:
 
-- Web-App einmal bereitstellen (v0.3), Bereitstellungs-ID als Variable `GAS_DEPLOYMENT_ID` speichern.
-- GitHub Pages für das Repo aktivieren (v0.3).
-- Script Property `WEBAPP_TOKEN` setzen (v0.3).
+1. Skripteigenschaft `WEBAPP_TOKEN` anlegen: ein selbst ausgedachtes, langes Passwort (mind. 20 Zeichen, nur Buchstaben und Ziffern).
+2. Im Script-Editor `webAppTesten` ausführen (prüft Token und Daten, loggt nur Größen).
+3. Script-Editor → „Bereitstellen“ → „Neue Bereitstellung“ → Typ „Web-App“, Ausführen als „Ich“, Zugriff „Jeder“ → „Bereitstellen“. Web-App-URL und Bereitstellungs-ID kopieren.
+4. GitHub → Settings → Secrets and variables → Actions → Variables: `GAS_DEPLOYMENT_ID` = Bereitstellungs-ID. Ab dann aktualisiert die Action die Web-App bei jeder Änderung an `gas/`.
+5. GitHub → Settings → Pages: Source „Deploy from a branch“, Branch `main`, Ordner `/docs` → Save. App-Adresse: https://obitusde.github.io/sport/
+6. App am Handy öffnen, unter Einstellungen Web-App-URL und Token eintragen, „Zum Startbildschirm hinzufügen“.
 
 ---
 
@@ -309,6 +326,7 @@ Später:
 | Version | Datum | Änderung |
 |---|---|---|
 | 0.1 | 2026-11-16 | Erste Projektbeschreibung aus der Planung im Chat |
+| 0.3.0 | 2026-11-17 | v0.3: `gas/WebApp.gs` 0.3.0 (doGet mit Token, Aktionen aktivitaeten, einstellungen, einstellungSetzen, status, Diagnose `webAppTesten`), `appsscript.json` mit Web-App-Einstellungen. App in `/docs` 0.3.0: Wochenansicht (Laufziel, was noch fehlt, Serie, Tage, Sport je Sportart, Aktivitäten, frühere Wochen), Einstellungen (Wochenziel, Verbindung, Datenstand), offline-fähig. Entscheidungen: App rechnet, Einstellungen im Sheet. Abschnitt 5 festgelegt |
 | 0.2.1 | 2026-11-17 | FIT-Ergebnis eingetragen, FIT-Auswertung bleibt in Apps Script. Sportart `schwimmen` neu, `gas/Sammler.gs` 0.2.1 berechnet die Sportart bei jedem Lauf neu. Woche ab Montag, Wochenziel Standard 2, einstellbar in der App. Erster Import: 2736 Aktivitäten |
 | 0.2.0 | 2026-11-17 | Diagnose-Ergebnisse eingetragen. Zuordnung Garmin-Typ → Sportart mit `ski`, `overland` ausgeschlossen. Sheet-Spalten `name` und `hat_gps` ergänzt. Neu: `gas/Sammler.gs` 0.2.0, `gas/Garmin.gs` 0.2.0, `gas/Hilfen.gs` 0.2.0. `gas/Diagnose.gs` 0.1.1 (FIT-Download mit anderem Accept-Kopf). `appsscript.json` mit Berechtigungen für Sheets, Mail, Zeitgeber. v0.6 angepasst, Historie kommt über die API |
 | 0.1.1 | 2026-11-17 | Swagger-Doku ausgewertet (Endpunkte, Felder, keine GPS-Spur außer FIT). Neu: `gas/Diagnose.gs` 0.1.0, `gas/appsscript.json`, `.github/workflows/deploy-gas.yml` 0.1.0, `CLAUDE.md` 0.1.0, `.gitignore`. Deployment per Action schon ab v0.1, Einrichtungsschritte präzisiert |
