@@ -1,6 +1,6 @@
 /**
- * WebApp.gs – v0.3: Schnittstelle für die App (JSON)
- * Version: 0.4.0 (2026-11-17)
+ * WebApp.gs – Schnittstelle für die App (JSON)
+ * Version: 0.5.0 (2026-11-17)
  *
  * Aufruf: GET <webapp-url>?token=<WEBAPP_TOKEN>&aktion=<aktion>&...
  *
@@ -22,9 +22,19 @@
  * Änderungen 0.3.1: Aktion „sammeln“ für den Knopf „Von Garmin holen“ (ohne Fehler-Mail,
  * der Fehler geht direkt an die App).
  * Änderungen 0.4.0: Aktion „details“ für die Detailansicht der App.
+ * Änderungen 0.5.0: Die kompakte Liste enthält Sportpunkte (pkt, pktGeschaetzt) und die
+ *   schnellsten Abschnitte (s1k, s5k, s10k, s21k). Neue Einstellung wochenzielPunkte.
+ *
+ * Sportpunkte (siehe PROJEKT.md): Garmins Intensitätsminuten, moderat ×1, intensiv ×2.
+ * - Nur für Aktivitäten ab PUNKTE_AB_JAHR (2023), davor null.
+ * - Fehlen die Intensitätsminuten (z. B. ohne Puls), wird geschätzt:
+ *   Bewegungsminuten × persönlicher Faktor der Sportart. Der Faktor ist
+ *   Summe Punkte / Summe Minuten aller Aktivitäten dieser Sportart mit echten Werten
+ *   ab 2023 (ohne Werte für die Sportart: Faktor über alle Sportarten).
  */
 
-const WEBAPP_VERSION = '0.4.0';
+const WEBAPP_VERSION = '0.5.0';
+const PUNKTE_AB_JAHR = 2023;
 const BLATT_KONFIGURATION = 'Konfiguration';
 
 /**
@@ -40,11 +50,21 @@ const EINSTELLUNGEN = {
       if (!Number.isInteger(n) || n < 0 || n > 14) throw new Error('wochenzielLaeufe muss eine ganze Zahl von 0 bis 14 sein.');
       return n;
     }
+  },
+  wochenzielPunkte: {
+    standard: 150,
+    beschreibung: 'Sportpunkte (Intensitätsminuten) pro Woche',
+    pruefen: function (w) {
+      const n = Number(w);
+      if (!Number.isInteger(n) || n < 0 || n > 3000) throw new Error('wochenzielPunkte muss eine ganze Zahl von 0 bis 3000 sein.');
+      return n;
+    }
   }
 };
 
 /** Spalten der kompakten Aktivitätsliste für die App. */
-const APP_SPALTEN = ['id', 'start', 'sportart', 'typ', 'name', 'km', 'min', 'minGesamt', 'hm', 'puls', 'gps'];
+const APP_SPALTEN = ['id', 'start', 'sportart', 'typ', 'name', 'km', 'min', 'minGesamt', 'hm', 'puls', 'gps',
+  'pkt', 'pktGeschaetzt', 's1k', 's5k', 's10k', 's21k'];
 
 // ---------------------------------------------------------------------------
 // Einstieg
@@ -88,7 +108,15 @@ function webAppTesten() {
     const daten = JSON.parse(text);
     let info = 'ok=' + daten.ok + ', ' + runden_(text.length / 1024, 1) + ' KB, ' + (Date.now() - t0) + ' ms';
     if (!daten.ok) info += ', fehler=' + daten.fehler;
-    if (aktion === 'aktivitaeten' && daten.ok) info += ', Zeilen: ' + daten.zeilen.length + ', Spalten: ' + daten.spalten.join(',');
+    if (aktion === 'aktivitaeten' && daten.ok) {
+      info += ', Zeilen: ' + daten.zeilen.length + ', Spalten: ' + daten.spalten.join(',');
+      const iPkt = daten.spalten.indexOf('pkt');
+      const iGes = daten.spalten.indexOf('pktGeschaetzt');
+      const mitPkt = daten.zeilen.filter(function (z) { return z[iPkt] !== null; });
+      info += ', mit Sportpunkten: ' + mitPkt.length + ' (davon geschätzt: ' +
+        mitPkt.filter(function (z) { return z[iGes]; }).length + ')';
+      info += ', Faktoren Punkte/min: ' + JSON.stringify(daten.punkteFaktoren);
+    }
     if (aktion === 'einstellungen' && daten.ok) info += ', Schlüssel: ' + Object.keys(daten.einstellungen).join(',');
     log_(aktion + ': ' + info);
     if (aktion === 'aktivitaeten' && daten.ok && daten.zeilen.length) {
@@ -136,11 +164,58 @@ function aktivitaetenKompakt_() {
   const i = {};
   SPALTEN.forEach(function (name, n) { i[name] = n; });
   const zahl = function (w) { return (w === '' || w === null) ? null : Number(w); };
+  const json = function (text) {
+    try {
+      return text ? JSON.parse(text) : {};
+    } catch (e) {
+      return {};
+    }
+  };
+  const details = werte.map(function (z) { return json(z[i.details]); });
+  const jahr = function (z) {
+    return z[i.start] instanceof Date ? z[i.start].getFullYear() : Number(String(z[i.start]).substring(0, 4));
+  };
+  const echtePunkte = function (d) {
+    if (typeof d.imModerat !== 'number' && typeof d.imIntensiv !== 'number') return null;
+    return (d.imModerat || 0) + 2 * (d.imIntensiv || 0);
+  };
 
-  const zeilen = werte.map(function (z) {
+  // Persönliche Faktoren (Punkte pro Bewegungsminute) je Sportart aus echten Werten ab 2023
+  const summen = { alle: { pkt: 0, min: 0 } };
+  werte.forEach(function (z, n) {
+    const p = echtePunkte(details[n]);
+    const min = zahl(z[i.dauer_min]);
+    if (jahr(z) < PUNKTE_AB_JAHR || p === null || !min) return;
+    const s = summen[z[i.sportart]] || (summen[z[i.sportart]] = { pkt: 0, min: 0 });
+    s.pkt += p;
+    s.min += min;
+    summen.alle.pkt += p;
+    summen.alle.min += min;
+  });
+  const faktoren = {};
+  Object.keys(summen).forEach(function (k) {
+    if (summen[k].min > 0) faktoren[k] = runden_(summen[k].pkt / summen[k].min, 3);
+  });
+
+  const zeilen = werte.map(function (z, n) {
     const start = z[i.start] instanceof Date
       ? Utilities.formatDate(z[i.start], ZEITZONE, "yyyy-MM-dd'T'HH:mm")
       : String(z[i.start]);
+    const d = details[n];
+    let pkt = null;
+    let geschaetzt = false;
+    if (jahr(z) >= PUNKTE_AB_JAHR) {
+      pkt = echtePunkte(d);
+      if (pkt === null) {
+        const faktor = faktoren[z[i.sportart]] !== undefined ? faktoren[z[i.sportart]] : faktoren.alle;
+        const min = zahl(z[i.dauer_min]);
+        if (faktor !== undefined && min) {
+          pkt = Math.round(min * faktor);
+          geschaetzt = true;
+        }
+      }
+    }
+    const split = function (s) { return typeof s === 'number' && s > 0 ? s : null; };
     return [
       String(z[i.activityId]),
       start,
@@ -152,10 +227,16 @@ function aktivitaetenKompakt_() {
       zahl(z[i.dauer_gesamt_min]),
       zahl(z[i.hoehenmeter]),
       zahl(z[i.puls_avg]),
-      z[i.hat_gps] === true
+      z[i.hat_gps] === true,
+      pkt,
+      geschaetzt,
+      split(d.split1kS),
+      split(d.split5kS),
+      split(d.split10kS),
+      split(d.split21kS)
     ];
   });
-  return { spalten: APP_SPALTEN, zeilen: zeilen };
+  return { spalten: APP_SPALTEN, zeilen: zeilen, punkteAbJahr: PUNKTE_AB_JAHR, punkteFaktoren: faktoren };
 }
 
 /** Liest die Spalte „details“ einer Aktivität. Leeres Objekt, wenn nichts da ist. */

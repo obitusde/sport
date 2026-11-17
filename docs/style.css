@@ -1,4 +1,4 @@
-/* style.css – Sport-App, Version 0.4.0 (2026-11-17) */
+/* style.css – Sport-App, Version 0.5.0 (2026-11-17) */
 
 :root {
   --hintergrund: #f6f5f2;
@@ -18,6 +18,7 @@
   --ski: #7a5bd1;
   --schwimmen: #1593a8;
   --andere: #8a8d93;
+  --aktiv: #c8467a;
 
   --zone1: #9aa0a8;
   --zone2: #3b8fd9;
@@ -49,6 +50,7 @@
     --ski: #9c84ea;
     --schwimmen: #3bb7cb;
     --andere: #9a9da3;
+    --aktiv: #ec6f9c;
     --zone1: #8e949c;
     --zone2: #5b9fe6;
     --zone3: #62bd6c;
@@ -75,6 +77,7 @@
   --ski: #9c84ea;
   --schwimmen: #3bb7cb;
   --andere: #9a9da3;
+  --aktiv: #ec6f9c;
   --zone1: #8e949c;
   --zone2: #5b9fe6;
   --zone3: #62bd6c;
@@ -183,6 +186,53 @@ button { font: inherit; color: inherit; }
   display: grid; place-items: center;
   background: var(--flaeche-2);
 }
+
+.ziel-art { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-2); }
+.balken { height: 10px; border-radius: 5px; background: var(--flaeche-2); overflow: hidden; margin: 14px 0 10px; }
+.balken span { display: block; height: 100%; border-radius: 5px; background: var(--farbe, var(--akzent)); }
+.klein-text { font-size: 0.8rem; margin: 8px 0 0; }
+.ca { font-size: 1.4rem; font-weight: 600; color: var(--text-2); margin-right: 2px; }
+
+/* Erfolge dieser Woche */
+.erfolge-woche { border-color: color-mix(in srgb, var(--akzent) 40%, var(--linie)); }
+.erfolge-titel { display: flex; align-items: center; gap: 8px; font-weight: 700; margin-bottom: 6px; }
+.pokal { width: 20px; height: 20px; fill: none; stroke: var(--akzent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.erfolge-woche ul { margin: 0; padding-left: 28px; }
+.erfolge-woche li { margin: 4px 0; color: var(--text-2); }
+.erfolge-woche li.stark { color: var(--text); font-weight: 600; }
+
+/* Erfolge-Ansicht */
+.serie-werte { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 10px 0 4px; font-size: 0.9rem; color: var(--text-2); }
+.serie-werte b { color: var(--text); font-size: 1.1rem; }
+.abzeichen { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; text-align: center; }
+.abz { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.abz-kreis {
+  width: 48px; height: 48px; border-radius: 50%;
+  display: grid; place-items: center;
+  font-weight: 700; font-size: 1.05rem;
+  border: 2px dashed var(--linie); color: var(--text-2);
+}
+.abz.erreicht .abz-kreis { border: 0; background: var(--farbe); color: #fff; box-shadow: 0 0 0 3px color-mix(in srgb, var(--farbe) 25%, transparent); }
+.abz-text { font-size: 0.75rem; font-weight: 600; line-height: 1.2; }
+.abz-text small { display: block; font-weight: 400; color: var(--text-2); }
+.liste-karte { padding: 4px 16px; }
+.bestmarke {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  width: 100%; padding: 10px 0; text-align: left;
+  background: none; border: 0; border-bottom: 1px solid var(--linie);
+  font: inherit; color: inherit;
+}
+.bestmarke:last-child { border-bottom: 0; }
+button.bestmarke { cursor: pointer; }
+.bm-titel { font-weight: 600; min-width: 0; }
+.bm-titel small { display: block; font-weight: 400; color: var(--text-2); font-size: 0.8rem; }
+.bm-wert { font-weight: 700; font-size: 1.1rem; white-space: nowrap; }
+.jahr-zeile + .jahr-zeile { margin-top: 14px; }
+.jahr-zeile .balken { margin: 8px 0 0; }
+.tabelle.jahre td { text-align: right; padding-right: 0; }
+.tabelle.jahre td:first-child { text-align: left; }
+.tabelle.jahre tr:first-child td { color: var(--text-2); font-size: 0.8rem; }
+.stufe { display: inline-block; font-size: 0.7rem; font-weight: 700; color: #fff; background: var(--farbe); border-radius: 6px; padding: 1px 5px; margin-left: 2px; }
 
 /* Tagesleiste */
 .tage { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; text-align: center; }

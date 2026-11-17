@@ -1,6 +1,6 @@
 /**
  * Diagnose.gs – Diagnose der Garmin Connect Personal API
- * Version: 0.1.2 (2026-11-17)
+ * Version: 0.1.3 (2026-11-17)
  *
  * Nur Diagnose: Alle Funktionen loggen, nichts wird gespeichert.
  * Nutzt Garmin.gs und Hilfen.gs.
@@ -23,6 +23,8 @@
  * Änderungen 0.1.2: diagnoseDetails() zählt, wie oft Garmin die Zusatzwerte für die
  * Detailansicht und die Intensitätsminuten liefert (pro Sportart und Jahr), und listet
  * die vorkommenden Trainingseffekt-Labels. Nur Zählungen, keine Werte.
+ * Änderungen 0.1.3: diagnoseDetails() heißt jetzt diagnoseZusatzwerte() (Verwechslung
+ * mit diagnoseDetail()).
  */
 
 const WERTE_LOGGEN = false;
@@ -390,7 +392,7 @@ function diagnoseHistorie() {
  * Zählt über die ganze Historie, wie oft die Zusatzwerte vorhanden sind.
  * Loggt nur Anzahlen und die Namen der Trainingseffekt-Labels.
  */
-function diagnoseDetails() {
+function diagnoseZusatzwerte() {
   log_('--- 6. Zusatzwerte (Details) ---');
   const alle = garminAktivitaeten_();
   log_('Aktivitäten: ' + alle.length);

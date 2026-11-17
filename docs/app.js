@@ -1,6 +1,6 @@
 /**
  * app.js – Sport-App
- * Version: 0.4.0 (2026-11-17)
+ * Version: 0.5.0 (2026-11-17)
  *
  * Ansichten: Woche, Einstellungen.
  * Die App holt die Aktivitäten als Liste von der Apps-Script-Web-App und rechnet
@@ -15,10 +15,14 @@
  * Änderungen 0.4.0: Detailansicht beim Tippen auf eine Aktivität (Tempo, Puls und
  * Pulszonen, Trainingseffekt, Intensitätsminuten, Laufstil, Bestzeiten). Details werden
  * beim ersten Öffnen von der Web-App geholt und auf dem Gerät gespeichert.
+ * Änderungen 0.5.0: Sportpunkte (Garmins Intensitätsminuten, ab 2023, Lücken geschätzt „≈“),
+ * Aktivziel mit eigener Serie, Ansicht „Erfolge“ (Serien-Abzeichen, Bestmarken, Jahres-km,
+ * Allrounder), Karte „Erfolge dieser Woche“ mit Wochenbilanz, Trainingseffekt mit Garmins
+ * deutschen Begriffen, „Unknown“ ausgeblendet.
  */
 'use strict';
 
-const APP_VERSION = '0.4.0';
+const APP_VERSION = '0.5.0';
 
 const SPEICHER = {
   url: 'sport.url',
@@ -53,7 +57,8 @@ const zustand = {
   wocheVersatz: 0,
   aktivitaeten: [],
   datenStand: null,
-  einstellungen: { wochenzielLaeufe: 2 },
+  einstellungen: { wochenzielLaeufe: 2, wochenzielPunkte: 150 },
+  index: null, // Wochenindex, wird bei neuen Daten verworfen
   status: null,
   webAppVersion: null,
   laedt: false, // false, 'garmin' (Sammler läuft) oder 'daten' (Liste wird geladen)
@@ -122,6 +127,11 @@ async function api(aktion, parameter) {
   return daten;
 }
 
+function setzeAktivitaeten(liste) {
+  zustand.aktivitaeten = liste.sort((x, y) => x.datum - y.datum);
+  zustand.index = null;
+}
+
 /** Wandelt die kompakte Liste in Objekte um. */
 function auspacken(daten) {
   const s = daten.spalten;
@@ -153,7 +163,7 @@ async function allesLaden() {
       api('einstellungen'),
       api('status')
     ]);
-    zustand.aktivitaeten = auspacken(liste);
+    setzeAktivitaeten(auspacken(liste));
     zustand.datenStand = new Date().toISOString();
     zustand.einstellungen = einst.einstellungen;
     zustand.status = status;
@@ -198,11 +208,11 @@ async function vonGarminHolen() {
 function ausSpeicherLaden() {
   const daten = lesen(SPEICHER.daten, null);
   if (daten && Array.isArray(daten.zeilen)) {
-    zustand.aktivitaeten = auspacken(daten);
+    setzeAktivitaeten(auspacken(daten));
     zustand.datenStand = daten.stand || null;
     zustand.webAppVersion = daten.version || null;
   }
-  zustand.einstellungen = Object.assign({ wochenzielLaeufe: 2 }, lesen(SPEICHER.einstellungen, {}));
+  zustand.einstellungen = Object.assign({ wochenzielLaeufe: 2, wochenzielPunkte: 150 }, lesen(SPEICHER.einstellungen, {}));
   zustand.status = lesen(SPEICHER.status, null);
 }
 
@@ -236,34 +246,228 @@ function kalenderwoche(d) {
   return Math.ceil(((t - jahresbeginn) / 86400000 + 1) / 7);
 }
 
-/** Anzahl Läufe pro Woche (Schlüssel = Montag als YYYY-MM-DD). */
-function laeufeProWoche() {
-  const proWoche = new Map();
+/** Erster Montag mit Sportpunkten (Intensitätsminuten gibt es ab 2023). */
+const PUNKTE_START = new Date(2023, 0, 2);
+const SERIEN_STUFEN = [4, 12, 26, 52];
+const JAHRES_STUFEN = { laufen: [100, 250, 500, 1000], rad: [1000, 2500, 5000, 10000], wandern: [100, 250, 500, 1000] };
+const BESTZEIT_DISTANZEN = [
+  { name: '1 km', km: 1, feld: 's1k' },
+  { name: '5 km', km: 5, feld: 's5k' },
+  { name: '10 km', km: 10, feld: 's10k' },
+  { name: 'Halbmarathon', km: 21.0975, feld: 's21k' }
+];
+const LEERE_WOCHE = { laeufe: 0, pkt: 0, hatPkt: false, geschaetzt: false, sportarten: new Set() };
+
+/** Wochen (Schlüssel = Montag als YYYY-MM-DD) mit Läufen, Sportpunkten und Sportarten. */
+function wochenIndex() {
+  if (zustand.index) return zustand.index;
+  const m = new Map();
   zustand.aktivitaeten.forEach(a => {
-    if (a.sportart !== 'laufen') return;
     const k = schluessel(montag(a.datum));
-    proWoche.set(k, (proWoche.get(k) || 0) + 1);
+    let w = m.get(k);
+    if (!w) {
+      w = { laeufe: 0, pkt: 0, hatPkt: false, geschaetzt: false, sportarten: new Set() };
+      m.set(k, w);
+    }
+    if (a.sportart === 'laufen') w.laeufe++;
+    if (typeof a.pkt === 'number') {
+      w.pkt += a.pkt;
+      w.hatPkt = true;
+      if (a.pktGeschaetzt) w.geschaetzt = true;
+    }
+    if (a.sportart !== 'andere') w.sportarten.add(a.sportart);
   });
-  return proWoche;
+  zustand.index = m;
+  return m;
+}
+
+function woche(montagDatum) {
+  return wochenIndex().get(schluessel(montagDatum)) || LEERE_WOCHE;
 }
 
 /**
- * Wochen-Serie: Wochen in Folge mit erreichtem Ziel. Die laufende Woche zählt mit,
- * sobald das Ziel erreicht ist; solange sie offen ist, bricht sie die Serie nicht.
- * Hinweis: Rückwirkend gilt das aktuelle Wochenziel.
+ * Wertet eine Serie aus: Wochen in Folge, in denen erfuellt(woche) gilt.
+ * Die laufende Woche zählt mit, sobald sie erfüllt ist; solange sie offen ist, bricht
+ * sie die Serie nicht. Rückwirkend gilt das aktuelle Ziel.
+ * @return {{aktuell, aktuellErreicht, laengste, laengsteBis, erreicht}} erreicht: Stufe → Montag
  */
-function serie(ziel) {
-  const proWoche = laeufeProWoche();
-  const dieseWoche = montag(new Date());
-  let anzahl = 0;
-  let w = tagePlus(dieseWoche, -7);
-  while ((proWoche.get(schluessel(w)) || 0) >= ziel) {
-    anzahl++;
-    w = tagePlus(w, -7);
-    if (anzahl > 2000) break;
+function serieAuswerten(erfuellt, ab) {
+  const diese = montag(new Date());
+  let lauf = 0;
+  let laengste = 0;
+  let laengsteBis = null;
+  const erreicht = {};
+  const zaehlen = w => {
+    lauf++;
+    if (lauf > laengste) { laengste = lauf; laengsteBis = w; }
+    SERIEN_STUFEN.forEach(s => { if (lauf === s && !erreicht[s]) erreicht[s] = w; });
+  };
+  for (let w = montag(ab); w < diese; w = tagePlus(w, 7)) {
+    if (erfuellt(woche(w))) zaehlen(w);
+    else lauf = 0;
   }
-  const aktuellErreicht = (proWoche.get(schluessel(dieseWoche)) || 0) >= ziel;
-  return { anzahl: anzahl + (aktuellErreicht ? 1 : 0), aktuellErreicht: aktuellErreicht };
+  const vorher = lauf;
+  const aktuellErreicht = erfuellt(woche(diese));
+  if (aktuellErreicht) zaehlen(diese);
+  return { aktuell: vorher + (aktuellErreicht ? 1 : 0), aktuellErreicht, laengste, laengsteBis, erreicht };
+}
+
+function serieLaufen() {
+  const ziel = Number(zustand.einstellungen.wochenzielLaeufe) || 0;
+  if (!ziel || !zustand.aktivitaeten.length) return null;
+  return serieAuswerten(w => w.laeufe >= ziel, zustand.aktivitaeten[0].datum);
+}
+
+function seriePunkte() {
+  const ziel = Number(zustand.einstellungen.wochenzielPunkte) || 0;
+  if (!ziel) return null;
+  return serieAuswerten(w => w.pkt >= ziel, PUNKTE_START);
+}
+
+/** Bestmarken über alle Jahre. Jede: {titel, wert, datum, id, hinweis}. */
+function bestmarken() {
+  const liste = zustand.aktivitaeten;
+  const laeufe = liste.filter(a => a.sportart === 'laufen');
+  // Laufband-Distanzen sind ungenau: für Bestzeiten nur Läufe draußen
+  const draussen = laeufe.filter(a => a.typ !== 'treadmill_running');
+  const ergebnis = { zeiten: [], weitere: [] };
+
+  BESTZEIT_DISTANZEN.forEach(dist => {
+    let best = null;
+    draussen.forEach(a => {
+      const kandidaten = [];
+      if (typeof a[dist.feld] === 'number' && a[dist.feld] > 0) kandidaten.push({ zeit: a[dist.feld], schnitt: false });
+      if (a.km >= dist.km && a.min) kandidaten.push({ zeit: a.min * 60 / a.km * dist.km, schnitt: true });
+      kandidaten.forEach(k => {
+        if (k.zeit / dist.km < 150) return; // schneller als 2:30 /km: GPS-Fehler
+        if (!best || k.zeit < best.zeit) best = { zeit: k.zeit, schnitt: k.schnitt, a: a };
+      });
+    });
+    if (best) {
+      ergebnis.zeiten.push({
+        titel: 'Schnellste ' + dist.name,
+        wert: zeitAusSekunden(best.zeit),
+        unter: pace(best.zeit / dist.km) + (best.schnitt ? ' · Ø des ganzen Laufs' : ''),
+        datum: best.a.datum, id: best.a.id
+      });
+    }
+  });
+
+  const laengste = (sportart, titel) => {
+    let best = null;
+    liste.forEach(a => { if (a.sportart === sportart && a.km && (!best || a.km > best.km)) best = a; });
+    if (best) ergebnis.weitere.push({ titel, wert: km(best.km), unter: best.name || '', datum: best.datum, id: best.id });
+  };
+  laengste('laufen', 'Längster Lauf');
+  laengste('rad', 'Längste Radtour');
+  laengste('wandern', 'Längste Wanderung');
+
+  // Meiste Höhenmeter an einem Tag (alle Sportarten)
+  const proTag = new Map();
+  liste.forEach(a => {
+    if (!a.hm) return;
+    const k = schluessel(a.datum);
+    const t = proTag.get(k) || { hm: 0, datum: a.datum };
+    t.hm += a.hm;
+    proTag.set(k, t);
+  });
+  let hmBest = null;
+  proTag.forEach(t => { if (!hmBest || t.hm > hmBest.hm) hmBest = t; });
+  if (hmBest) ergebnis.weitere.push({ titel: 'Meiste Höhenmeter an einem Tag', wert: zahlFormat0.format(hmBest.hm) + ' m', unter: '', datum: hmBest.datum });
+
+  // Meiste Sportpunkte in einer Woche
+  let pktBest = null;
+  wochenIndex().forEach((w, k) => { if (w.hatPkt && (!pktBest || w.pkt > pktBest.pkt)) pktBest = { pkt: w.pkt, datum: lokalesDatum(k), geschaetzt: w.geschaetzt }; });
+  if (pktBest) {
+    ergebnis.weitere.push({ titel: 'Meiste Sportpunkte in einer Woche', wert: (pktBest.geschaetzt ? '≈ ' : '') + pktBest.pkt,
+      unter: '', datum: pktBest.datum, datumText: 'KW ' + kalenderwoche(pktBest.datum) + '/' + pktBest.datum.getFullYear() });
+  }
+  return ergebnis;
+}
+
+/** Kilometer pro Jahr und Sportart. */
+function jahresKm() {
+  const m = new Map();
+  zustand.aktivitaeten.forEach(a => {
+    if (!JAHRES_STUFEN[a.sportart] || !a.km) return;
+    const j = a.datum.getFullYear();
+    const x = m.get(j) || { laufen: 0, rad: 0, wandern: 0 };
+    x[a.sportart] += a.km;
+    m.set(j, x);
+  });
+  return m;
+}
+
+/** Höchste erreichte Stufe oder 0. */
+function stufeErreicht(sportart, kmWert) {
+  return JAHRES_STUFEN[sportart].filter(s => kmWert >= s).pop() || 0;
+}
+
+/** Wochen mit mindestens 3 Sportarten (ohne „andere“). */
+function allrounderWochen() {
+  const wochen = [];
+  wochenIndex().forEach((w, k) => { if (w.sportarten.size >= 3) wochen.push(lokalesDatum(k)); });
+  return wochen.sort((x, y) => x - y);
+}
+
+/** Was in einer Woche erreicht wurde: Bilanz, neue Abzeichen, Bestmarken, Jahres-km. */
+function wochenErfolge(w) {
+  const punkte = [];
+  const istDiese = zustand.wocheVersatz === 0;
+
+  // Wochenbilanz nach Sportpunkten
+  if (w.start >= PUNKTE_START && w.pkt > 0) {
+    let n = 0;
+    let gefunden = null;
+    for (let x = tagePlus(w.start, -7); x >= PUNKTE_START; x = tagePlus(x, -7)) {
+      n++;
+      if (woche(x).pkt >= w.pkt) { gefunden = x; break; }
+    }
+    const vorsatz = istDiese ? 'Bisher beste Woche' : 'Beste Woche';
+    if (!gefunden) punkte.push({ text: vorsatz + ' seit Beginn der Sportpunkte (2023)', stark: true });
+    else if (n > 8) punkte.push({ text: vorsatz + ' seit ' + MONATE[gefunden.getMonth()] + ' ' + gefunden.getFullYear(), stark: true });
+    else if (n >= 4) punkte.push({ text: vorsatz + ' seit ' + n + ' Wochen', stark: true });
+    const vor = woche(tagePlus(w.start, -7));
+    if (vor.hatPkt) {
+      const diff = w.pkt - vor.pkt;
+      if (diff > 0) punkte.push({ text: '+' + diff + ' Sportpunkte gegenüber der Vorwoche' });
+    }
+  }
+
+  // Erstmals erreichte Serien-Stufen in dieser Woche
+  const k = schluessel(w.start);
+  [[serieLaufen(), 'Laufziel'], [seriePunkte(), 'Aktivziel']].forEach(([s, name]) => {
+    if (!s) return;
+    SERIEN_STUFEN.forEach(stufe => {
+      if (s.erreicht[stufe] && schluessel(s.erreicht[stufe]) === k) {
+        punkte.push({ text: 'Abzeichen: ' + stufe + ' Wochen ' + name + ' in Folge', stark: true });
+      }
+    });
+  });
+
+  // Bestmarken aus dieser Woche
+  const b = bestmarken();
+  b.zeiten.concat(b.weitere).forEach(x => {
+    if (x.datum >= w.start && x.datum < tagePlus(w.start, 7)) punkte.push({ text: 'Bestmarke: ' + x.titel + ' – ' + x.wert, stark: true });
+  });
+
+  // Jahres-km-Stufen, die in dieser Woche überschritten wurden
+  const jahr = w.ende.getFullYear();
+  const jahresbeginn = new Date(jahr, 0, 1);
+  Object.keys(JAHRES_STUFEN).forEach(sa => {
+    let vorher = 0;
+    let nachher = 0;
+    zustand.aktivitaeten.forEach(a => {
+      if (a.sportart !== sa || !a.km || a.datum < jahresbeginn || a.datum.getFullYear() !== jahr) return;
+      if (a.datum < w.start) vorher += a.km;
+      if (a.datum < tagePlus(w.start, 7)) nachher += a.km;
+    });
+    const s = stufeErreicht(sa, nachher);
+    if (s && s > stufeErreicht(sa, vorher)) punkte.push({ text: 'Jahres-Abzeichen: ' + zahlFormat0.format(s) + ' km ' + SPORT_NAME[sa] + ' ' + jahr, stark: true });
+  });
+
+  if (w.sportarten.size >= 3) punkte.push({ text: 'Allrounder-Woche: ' + w.sportarten.size + ' Sportarten' });
+  return punkte;
 }
 
 /** Alles, was die Wochenansicht braucht. */
@@ -277,11 +481,16 @@ function wochendaten(versatz) {
 
   const summen = {};
   liste.forEach(a => {
-    const s = summen[a.sportart] || (summen[a.sportart] = { anzahl: 0, km: 0, min: 0, hm: 0 });
+    const s = summen[a.sportart] || (summen[a.sportart] = { anzahl: 0, km: 0, min: 0, hm: 0, pkt: 0, hatPkt: false, geschaetzt: false });
     s.anzahl++;
     s.km += a.km || 0;
     s.min += a.min || 0;
     s.hm += a.hm || 0;
+    if (typeof a.pkt === 'number') {
+      s.pkt += a.pkt;
+      s.hatPkt = true;
+      if (a.pktGeschaetzt) s.geschaetzt = true;
+    }
   });
 
   const tage = [];
@@ -299,7 +508,12 @@ function wochendaten(versatz) {
   const laeufe = summen.laufen ? summen.laufen.anzahl : 0;
   // Verbleibende Tage inklusive heute, nur für die laufende Woche
   const restTage = versatz === 0 ? 7 - ((heute.getDay() + 6) % 7) : 0;
-  return { start, ende: tagePlus(start, 6), liste, summen, tage, ziel, laeufe, restTage };
+  const wi = woche(start);
+  return {
+    start, ende: tagePlus(start, 6), liste, summen, tage, ziel, laeufe, restTage,
+    pkt: wi.pkt, hatPkt: wi.hatPkt, geschaetzt: wi.geschaetzt, sportarten: wi.sportarten,
+    zielPunkte: Number(zustand.einstellungen.wochenzielPunkte) || 0
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -382,6 +596,8 @@ function ansichtWoche() {
 
   html += aktualisierenZeile();
   html += zielKarte(w);
+  html += punkteKarte(w);
+  html += erfolgeKarte(w);
   html += tagesKarte(w);
 
   html += '<h2>Sport in dieser Woche</h2>';
@@ -395,6 +611,7 @@ function ansichtWoche() {
       if (x.km) werte.push('<b>' + km(x.km) + '</b>');
       if (x.min) werte.push(dauer(x.min));
       if (x.hm) werte.push(zahlFormat0.format(x.hm) + ' hm');
+      if (x.hatPkt) werte.push((x.geschaetzt ? '≈ ' : '') + x.pkt + ' Pkt');
       return `<div class="summe" style="--farbe: var(--${s.key})">
         <div class="summe-kopf"><span class="summe-name">${s.name}</span><span class="summe-anzahl">${x.anzahl}×</span></div>
         <div class="summe-werte">${werte.join(' · ') || '–'}</div>
@@ -448,24 +665,72 @@ function zielKarte(w) {
     klasse = 'verfehlt';
   }
 
-  let serieHtml = '';
-  if (zustand.wocheVersatz === 0) {
-    const s = serie(w.ziel);
-    const unter = s.aktuellErreicht ? 'inklusive dieser Woche'
-      : s.anzahl ? 'diese Woche noch offen' : 'starte diese Woche eine neue Serie';
-    serieHtml = `<div class="serie">
-      <span class="serie-zahl">${s.anzahl}</span>
-      <div><b>${s.anzahl === 1 ? 'Woche' : 'Wochen'} in Folge</b><br><span class="leise">${unter}</span></div>
-    </div>`;
-  }
+  const serieHtml = zustand.wocheVersatz === 0 ? serieZeile(serieLaufen(), 'Laufziel') : '';
 
   return `<section class="karte" aria-label="Laufziel">
     <div class="ziel-zeile">
       <div class="ziel-zahl">${w.laeufe} <small>von ${w.ziel} Läufen</small></div>
+      <span class="ziel-art">Laufziel</span>
     </div>
     <div class="ziel-punkte">${punkte.join('')}</div>
     <div class="ziel-text ${klasse}">${text}</div>
     ${serieHtml}
+  </section>`;
+}
+
+function serieZeile(s, name) {
+  if (!s) return '';
+  const unter = s.aktuellErreicht ? 'inklusive dieser Woche'
+    : s.aktuell ? 'diese Woche noch offen' : 'starte diese Woche eine neue Serie';
+  return `<div class="serie">
+    <span class="serie-zahl">${s.aktuell}</span>
+    <div><b>${s.aktuell === 1 ? 'Woche' : 'Wochen'} ${name} in Folge</b><br><span class="leise">${unter}${s.laengste > s.aktuell ? ' · Rekord ' + s.laengste : ''}</span></div>
+  </div>`;
+}
+
+/** Aktivziel: Sportpunkte der Woche. */
+function punkteKarte(w) {
+  if (w.ende < PUNKTE_START) {
+    return '<section class="karte" style="margin-top:12px"><p class="leise" style="margin:0">Sportpunkte gibt es ab 2023 (Intensitätsminuten von Garmin).</p></section>';
+  }
+  const ziel = w.zielPunkte;
+  const ca = w.geschaetzt ? '<span class="ca">≈</span>' : '';
+  if (!ziel) {
+    return `<section class="karte" style="margin-top:12px"><div class="ziel-zeile"><div class="ziel-zahl">${ca}${w.pkt} <small>Sportpunkte</small></div><span class="ziel-art">Aktivziel</span></div>
+      <p class="leise">Kein Aktivziel gesetzt (Einstellungen).</p></section>`;
+  }
+  const anteil = Math.min(1, w.pkt / ziel);
+  const fehlt = Math.max(0, ziel - w.pkt);
+  let text;
+  let klasse;
+  if (!fehlt) {
+    text = w.pkt > ziel ? 'Ziel erreicht, ' + (w.pkt - ziel) + ' Punkte extra' : 'Ziel erreicht';
+    klasse = 'gut';
+  } else if (zustand.wocheVersatz === 0) {
+    text = 'Noch ' + fehlt + ' Punkte · ' + (w.restTage === 1 ? 'nur noch heute' : w.restTage + ' Tage übrig (mit heute)');
+    klasse = 'offen';
+  } else {
+    text = 'Ziel verfehlt, ' + fehlt + ' Punkte zu wenig';
+    klasse = 'verfehlt';
+  }
+  return `<section class="karte" aria-label="Aktivziel" style="margin-top:12px">
+    <div class="ziel-zeile">
+      <div class="ziel-zahl">${ca}${w.pkt} <small>von ${ziel} Punkten</small></div>
+      <span class="ziel-art">Aktivziel</span>
+    </div>
+    <div class="balken" style="--farbe: var(--aktiv)"><span style="width:${(anteil * 100).toFixed(1)}%"></span></div>
+    <div class="ziel-text ${klasse}">${text}</div>
+    ${w.geschaetzt ? '<p class="leise klein-text">≈ enthält geschätzte Punkte für Aktivitäten ohne Intensitätsminuten.</p>' : ''}
+    ${zustand.wocheVersatz === 0 ? serieZeile(seriePunkte(), 'Aktivziel') : ''}
+  </section>`;
+}
+
+function erfolgeKarte(w) {
+  const punkte = wochenErfolge(w);
+  if (!punkte.length) return '';
+  return `<section class="karte erfolge-woche" aria-label="Erfolge dieser Woche" style="margin-top:12px">
+    <div class="erfolge-titel">${SYMBOL_POKAL} Erfolge dieser Woche</div>
+    <ul>${punkte.map(p => `<li class="${p.stark ? 'stark' : ''}">${esc(p.text)}</li>`).join('')}</ul>
   </section>`;
 }
 
@@ -511,23 +776,107 @@ function standZeile() {
   return '<p class="leise stand">Daten auf diesem Gerät: ' + zeitpunkt(zustand.datenStand) + '</p>';
 }
 
+const SYMBOL_POKAL = '<svg class="pokal" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg>';
+
+function datumLang(d) {
+  return d.getDate() + '. ' + MONATE[d.getMonth()] + ' ' + d.getFullYear();
+}
+
+function abzeichenReihe(s, farbe) {
+  return '<div class="abzeichen">' + SERIEN_STUFEN.map(stufe => {
+    const am = s && s.erreicht[stufe];
+    const unter = am ? 'KW ' + kalenderwoche(am) + '/' + am.getFullYear()
+      : s ? 'noch ' + (stufe - s.aktuell) : '–';
+    return `<div class="abz ${am ? 'erreicht' : ''}" style="--farbe: var(--${farbe})">
+      <span class="abz-kreis">${stufe}</span>
+      <span class="abz-text">Wochen<small>${unter}</small></span>
+    </div>`;
+  }).join('') + '</div>';
+}
+
+function bestmarkeZeile(x) {
+  const inhalt = `<span class="bm-titel">${esc(x.titel)}<small>${esc(x.unter || '')}${x.unter ? ' · ' : ''}${esc(x.datumText || datumLang(x.datum))}</small></span>
+    <span class="bm-wert">${esc(x.wert)}</span>`;
+  return x.id ? `<button type="button" class="bestmarke" data-aktion="detail" data-id="${esc(x.id)}">${inhalt}</button>`
+    : `<div class="bestmarke">${inhalt}</div>`;
+}
+
+function ansichtErfolge() {
+  if (!zustand.aktivitaeten.length) return '<h1>Erfolge</h1><div class="karte leer">Noch keine Daten geladen.</div>';
+  const sl = serieLaufen();
+  const sp = seriePunkte();
+  const serieKarte = (s, name, ziel, farbe, einheit) => `<section class="karte">
+    <div class="ziel-zeile"><b>${name}</b><span class="leise">${ziel ? ziel + ' ' + einheit + ' pro Woche' : 'kein Ziel gesetzt'}</span></div>
+    ${s ? `<p class="serie-werte"><span><b>${s.aktuell}</b> aktuelle Serie</span><span><b>${s.laengste}</b> längste Serie${s.laengsteBis ? ' (bis KW ' + kalenderwoche(s.laengsteBis) + '/' + s.laengsteBis.getFullYear() + ')' : ''}</span></p>` + abzeichenReihe(s, farbe) : ''}
+  </section>`;
+
+  let html = '<h1>Erfolge</h1><h2>Serien</h2>';
+  html += serieKarte(sl, 'Laufziel', zustand.einstellungen.wochenzielLaeufe, 'laufen', 'Läufe');
+  html += serieKarte(sp, 'Aktivziel', zustand.einstellungen.wochenzielPunkte, 'aktiv', 'Sportpunkte');
+  html += '<p class="leise klein-text">Aktivziel ab 2023. Rückwirkend gilt das aktuelle Ziel.</p>';
+
+  const b = bestmarken();
+  if (b.zeiten.length) html += '<h2>Bestzeiten Laufen</h2><section class="karte liste-karte">' + b.zeiten.map(bestmarkeZeile).join('') + '</section>' +
+    '<p class="leise klein-text">Ohne Laufband. „Ø des ganzen Laufs“: Garmin hat für diesen Lauf keinen schnellsten Abschnitt, gerechnet wird mit der Durchschnitts-Pace.</p>';
+  if (b.weitere.length) html += '<h2>Bestmarken</h2><section class="karte liste-karte">' + b.weitere.map(bestmarkeZeile).join('') + '</section>';
+
+  // Jahres-Kilometer
+  const jk = jahresKm();
+  const jahre = Array.from(jk.keys()).sort((x, y) => y - x);
+  if (jahre.length) {
+    const jetzt = new Date().getFullYear();
+    const aktuell = jk.get(jetzt) || { laufen: 0, rad: 0, wandern: 0 };
+    html += '<h2>Jahres-Kilometer ' + jetzt + '</h2><section class="karte">' + Object.keys(JAHRES_STUFEN).map(sa => {
+      const wert = aktuell[sa];
+      const naechste = JAHRES_STUFEN[sa].find(s => wert < s);
+      const anteil = naechste ? wert / naechste : 1;
+      return `<div class="jahr-zeile" style="--farbe: var(--${sa})">
+        <div class="ziel-zeile"><b>${SPORT_NAME[sa]}</b><span>${km(wert)}${naechste ? ' <span class="leise">/ ' + zahlFormat0.format(naechste) + ' km</span>' : ' · alle Stufen'}</span></div>
+        <div class="balken"><span style="width:${(anteil * 100).toFixed(1)}%"></span></div>
+      </div>`;
+    }).join('') + '</section>';
+
+    html += '<h2>Frühere Jahre</h2><section class="karte"><table class="tabelle jahre"><tr><td>Jahr</td>' +
+      Object.keys(JAHRES_STUFEN).map(sa => '<td>' + SPORT_NAME[sa] + '</td>').join('') + '</tr>' +
+      jahre.map(j => '<tr><td>' + j + '</td>' + Object.keys(JAHRES_STUFEN).map(sa => {
+        const wert = jk.get(j)[sa];
+        const s = stufeErreicht(sa, wert);
+        return '<td>' + (wert ? zahlFormat0.format(Math.floor(wert)) + (s ? ' <span class="stufe" style="--farbe: var(--' + sa + ')">' + zahlFormat0.format(s) + '</span>' : '') : '–') + '</td>';
+      }).join('') + '</tr>').join('') + '</table></section>' +
+      '<p class="leise klein-text">Stufen: Laufen und Wandern 100, 250, 500, 1000 km · Rad 1000, 2500, 5000, 10000 km.</p>';
+  }
+
+  const ar = allrounderWochen();
+  html += `<h2>Allrounder</h2><section class="karte"><p style="margin:0"><b>${ar.length}</b> ${ar.length === 1 ? 'Woche' : 'Wochen'} mit mindestens 3 Sportarten${ar.length ? ' · zuletzt KW ' + kalenderwoche(ar[ar.length - 1]) + '/' + ar[ar.length - 1].getFullYear() : ''}</p></section>`;
+  return html;
+}
+
+function zaehlerHtml(wert, aktionMinus, aktionPlus, min, max, text, unter) {
+  const v = verbindung();
+  return `<div class="zaehler">
+      <button class="rund" data-aktion="${aktionMinus}" aria-label="Verringern" ${wert <= min || !v.token ? 'disabled' : ''}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg></button>
+      <span class="zaehler-wert">${wert}</span>
+      <button class="rund" data-aktion="${aktionPlus}" aria-label="Erhöhen" ${wert >= max || !v.token ? 'disabled' : ''}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+      <span>${text}<br><span class="leise">${unter}</span></span>
+    </div>`;
+}
+
 function ansichtEinstellungen() {
   const v = verbindung();
   const st = zustand.status;
   const ziel = Number(zustand.einstellungen.wochenzielLaeufe) || 0;
+  const zielPunkte = Number(zustand.einstellungen.wochenzielPunkte) || 0;
 
   return `<h1>Einstellungen</h1>
 
-  <h2>Wochenziel</h2>
+  <h2>Wochenziele</h2>
   <section class="karte">
-    <div class="zaehler">
-      <button class="rund" data-aktion="ziel-minus" aria-label="Ziel verringern" ${ziel <= 0 || !v.token ? 'disabled' : ''}>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg></button>
-      <span class="zaehler-wert">${ziel}</span>
-      <button class="rund" data-aktion="ziel-plus" aria-label="Ziel erhöhen" ${ziel >= 14 || !v.token ? 'disabled' : ''}>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
-      <span>Läufe pro Woche<br><span class="leise">Montag bis Sonntag</span></span>
-    </div>
+    ${zaehlerHtml(ziel, 'ziel-minus', 'ziel-plus', 0, 14, 'Läufe pro Woche', 'Laufziel, Montag bis Sonntag')}
+  </section>
+  <section class="karte">
+    ${zaehlerHtml(zielPunkte, 'punkte-minus', 'punkte-plus', 0, 1000, 'Sportpunkte pro Woche', 'Aktivziel, Schritte von 10 · Garmin/WHO: 150')}
   </section>
 
   <h2>Verbindung</h2>
@@ -572,15 +921,14 @@ const ZONEN = [
   { name: 'Zone 5', text: 'Maximum' }
 ];
 
-/** Garmin-Trainingseffekt-Labels; unbekannte werden lesbar gemacht. */
+/** Garmin-Trainingseffekt-Labels mit Garmins deutschen Begriffen (Werte laut diagnoseZusatzwerte). */
 const TE_LABEL = {
-  RECOVERY: 'Erholung', AEROBIC_BASE: 'Grundlage', TEMPO: 'Tempo', LACTATE_THRESHOLD: 'Laktatschwelle',
-  THRESHOLD: 'Schwelle', VO2MAX: 'VO2max', ANAEROBIC_CAPACITY: 'Anaerobe Kapazität', SPEED: 'Schnelligkeit',
-  SPRINT: 'Sprint', NO_BENEFIT: 'Kein Nutzen'
+  RECOVERY: 'Erholung', AEROBIC_BASE: 'Basis', TEMPO: 'Tempo', LACTATE_THRESHOLD: 'Schwelle',
+  VO2MAX: 'VO2max', ANAEROBIC_CAPACITY: 'Anaerob', SPEED: 'Sprint'
 };
 
 function teLabel(label) {
-  if (!label) return '';
+  if (!label || label === 'UNKNOWN') return '';
   return TE_LABEL[label] || label.toLowerCase().replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
 }
 
@@ -680,6 +1028,7 @@ function ansichtDetail() {
   if (a.hm) kz.push(kennzahl(zahlFormat0.format(a.hm) + (d.hmAb ? ' / ' + zahlFormat0.format(d.hmAb) : '') + ' m', d.hmAb ? 'Höhenmeter auf / ab' : 'Höhenmeter'));
   if (a.puls) kz.push(kennzahl(a.puls + (d.pulsMax ? ' / ' + d.pulsMax : ''), d.pulsMax ? 'Puls Ø / max' : 'Ø Puls'));
   if (d.kalorien) kz.push(kennzahl(zahlFormat0.format(d.kalorien) + ' kcal', 'Kalorien'));
+  if (typeof a.pkt === 'number') kz.push(kennzahl((a.pktGeschaetzt ? '≈ ' : '') + a.pkt, a.pktGeschaetzt ? 'Sportpunkte (geschätzt)' : 'Sportpunkte'));
   if (a.minGesamt && a.min && a.minGesamt - a.min >= 1) kz.push(kennzahl(dauer(a.minGesamt), 'Gesamtzeit'));
   if (d.vMaxMs && !lauf) kz.push(kennzahl(dezimal1.format(d.vMaxMs * 3.6) + ' km/h', 'Max. Geschwindigkeit'));
   html += '<div class="kennzahlen">' + kz.join('') + '</div>';
@@ -706,12 +1055,12 @@ function ansichtDetail() {
   const training = [];
   if (typeof d.teAerob === 'number') training.push(zeile('Trainingseffekt aerob', dezimal1.format(d.teAerob) + ' · ' + teText(d.teAerob)));
   if (typeof d.teAnaerob === 'number') training.push(zeile('Trainingseffekt anaerob', dezimal1.format(d.teAnaerob) + ' · ' + teText(d.teAnaerob)));
-  if (d.teLabel) training.push(zeile('Haupt-Nutzen', esc(teLabel(d.teLabel))));
+  if (teLabel(d.teLabel)) training.push(zeile('Haupt-Nutzen', esc(teLabel(d.teLabel))));
   if (typeof d.belastung === 'number') training.push(zeile('Trainingsbelastung', zahlFormat0.format(d.belastung)));
   if (typeof d.imModerat === 'number' || typeof d.imIntensiv === 'number') {
     const mod = d.imModerat || 0;
     const int = d.imIntensiv || 0;
-    training.push(zeile('Intensitätsminuten', `<b>${mod + 2 * int}</b> <span class="leise">(${mod} moderat + 2 × ${int} intensiv)</span>`));
+    training.push(zeile('Intensitätsminuten', `${mod} moderat + ${int} intensiv`));
   }
   if (typeof d.bodyBattery === 'number') training.push(zeile('Body Battery', (d.bodyBattery > 0 ? '+' : '') + d.bodyBattery));
   if (training.length) html += '<h2>Training</h2><section class="karte"><table class="tabelle">' + training.join('') + '</table></section>';
@@ -754,7 +1103,8 @@ function ansichtDetail() {
 function zeichnen() {
   const inhalt = document.getElementById('inhalt');
   inhalt.innerHTML = zustand.ansicht === 'einstellungen' ? ansichtEinstellungen()
-    : zustand.ansicht === 'detail' ? ansichtDetail() : ansichtWoche();
+    : zustand.ansicht === 'erfolge' ? ansichtErfolge()
+      : zustand.ansicht === 'detail' ? ansichtDetail() : ansichtWoche();
   document.querySelectorAll('.leiste-knopf').forEach(k => {
     const aktiv = k.dataset.ansicht === zustand.ansicht || (k.dataset.ansicht === 'woche' && zustand.ansicht === 'detail');
     k.classList.toggle('aktiv', aktiv);
@@ -772,22 +1122,29 @@ function meldung(text) {
   meldungZeit = setTimeout(() => { m.hidden = true; }, 3500);
 }
 
-async function zielAendern(delta) {
-  const alt = Number(zustand.einstellungen.wochenzielLaeufe) || 0;
-  const neu = Math.min(14, Math.max(0, alt + delta));
+let zielSpeichernZeit = null;
+
+/** Ändert ein Wochenziel sofort in der App und speichert kurz danach im Sheet. */
+function zielAendern(schluessel, delta, max, name) {
+  const alt = Number(zustand.einstellungen[schluessel]) || 0;
+  const neu = Math.min(max, Math.max(0, alt + delta));
   if (neu === alt) return;
-  zustand.einstellungen.wochenzielLaeufe = neu;
+  zustand.einstellungen[schluessel] = neu;
   zeichnen();
-  try {
-    const antwort = await api('einstellungSetzen', { schluessel: 'wochenzielLaeufe', wert: neu });
-    zustand.einstellungen = antwort.einstellungen;
-    schreiben(SPEICHER.einstellungen, antwort.einstellungen);
-    meldung('Wochenziel gespeichert: ' + neu);
-  } catch (e) {
-    zustand.einstellungen.wochenzielLaeufe = alt;
-    meldung('Nicht gespeichert: ' + e.message);
-  }
-  zeichnen();
+  // Mehrfaches Tippen zusammenfassen
+  clearTimeout(zielSpeichernZeit);
+  zielSpeichernZeit = setTimeout(async () => {
+    try {
+      const antwort = await api('einstellungSetzen', { schluessel: schluessel, wert: zustand.einstellungen[schluessel] });
+      zustand.einstellungen = antwort.einstellungen;
+      schreiben(SPEICHER.einstellungen, antwort.einstellungen);
+      meldung(name + ' gespeichert: ' + antwort.einstellungen[schluessel]);
+    } catch (e) {
+      zustand.einstellungen = Object.assign({}, zustand.einstellungen, lesen(SPEICHER.einstellungen, {}));
+      meldung('Nicht gespeichert: ' + e.message);
+    }
+    zeichnen();
+  }, 700);
 }
 
 document.addEventListener('click', ereignis => {
@@ -806,13 +1163,15 @@ document.addEventListener('click', ereignis => {
     case 'woche-zurueck': zustand.wocheVersatz--; zeichnen(); break;
     case 'woche-vor': zustand.wocheVersatz = Math.min(0, zustand.wocheVersatz + 1); zeichnen(); break;
     case 'zu-einstellungen': zustand.ansicht = 'einstellungen'; zeichnen(); break;
-    case 'ziel-minus': zielAendern(-1); break;
-    case 'ziel-plus': zielAendern(1); break;
+    case 'ziel-minus': zielAendern('wochenzielLaeufe', -1, 14, 'Laufziel'); break;
+    case 'ziel-plus': zielAendern('wochenzielLaeufe', 1, 14, 'Laufziel'); break;
+    case 'punkte-minus': zielAendern('wochenzielPunkte', -10, 1000, 'Aktivziel'); break;
+    case 'punkte-plus': zielAendern('wochenzielPunkte', 10, 1000, 'Aktivziel'); break;
     case 'von-garmin': vonGarminHolen(); break;
     case 'verbindung-loeschen':
       if (confirm('Verbindung und gespeicherte Daten auf diesem Gerät löschen?')) {
         Object.values(SPEICHER).forEach(k => schreiben(k, null));
-        zustand.aktivitaeten = [];
+        setzeAktivitaeten([]);
         zustand.status = null;
         zustand.datenStand = null;
         zeichnen();

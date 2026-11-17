@@ -1,6 +1,6 @@
 # PROJEKT.md – Sport-Tracker (Arbeitstitel „sport")
 
-Version: 0.4.0 (2026-11-17) – v0.4 Detailansicht gebaut
+Version: 0.5.0 (2026-11-17) – v0.5 Sportpunkte und Erfolge gebaut
 
 Dieses Dokument ist die Grundlage für die Entwicklung mit Claude Code. Es beschreibt Ziele, Architektur, Arbeitsweise und Fahrplan. Claude Code liest es vor jeder Arbeit und hält es aktuell.
 
@@ -115,7 +115,10 @@ Epix / Tacho → Garmin Connect (unverändert)
 - **Aktualisieren:** Nachts automatisch (3–4 Uhr), tagsüber nur von Hand über den Knopf „Von Garmin holen“ in der App. Kein stündlicher Abruf.
 - **Distanz in der App:** immer eine Nachkommastelle mit Komma, abgerundet (4,96 km → „4,9 km“).
 - **Detailansicht** (v0.4): Beim Tippen auf eine Aktivität holt die App die Spalte `details` über die Web-App und merkt sie sich auf dem Gerät. Die Liste bleibt dadurch klein.
-- **Sportpunkte = Garmins Intensitätsminuten** (entschieden 2026-11-17): moderate Minuten ×1, intensive ×2, aus den Aktivitäten (`moderateIntensityMinutes`, `vigorousIntensityMinutes`). Pulsbasiert, dadurch sportartübergreifend vergleichbar: Eine lange Wanderung oder ein Skitag zählt wie entsprechend viele Läufe. Minuten im Alltag ohne Aktivität zählen nicht. Fehlen die Werte bei alten Aktivitäten, werden sie geschätzt (Entscheidung nach `diagnoseDetails`).
+- **Sportpunkte = Garmins Intensitätsminuten** (entschieden 2026-11-17): moderate Minuten ×1, intensive ×2, aus den Aktivitäten (`moderateIntensityMinutes`, `vigorousIntensityMinutes`). Pulsbasiert, dadurch sportartübergreifend vergleichbar: Eine lange Wanderung oder ein Skitag zählt wie entsprechend viele Läufe. Minuten im Alltag ohne Aktivität zählen nicht.
+- **Sportpunkte erst ab 2023** (Diagnose: Intensitätsminuten gibt es erst ab 2023, davor meist nicht einmal Puls). Ab 2023 fehlende Werte (ca. 240 Aktivitäten) werden geschätzt: Bewegungsminuten × persönlicher Faktor der Sportart (Summe Punkte / Summe Minuten der Aktivitäten mit echten Werten ab 2023), in der App mit „≈“ markiert. Berechnet in `gas/WebApp.gs`.
+- **Bestzeiten Laufen:** schnellste 1 km, 5 km, 10 km, Halbmarathon aus Garmins schnellsten Abschnitten; fehlen diese, zählt die Durchschnitts-Pace eines Laufs, der mindestens so lang war. Ohne Laufband, ohne unplausible Werte (schneller als 2:30 /km).
+- **Jahres-km-Stufen:** Laufen und Wandern 100, 250, 500, 1000 km; Rad 1000, 2500, 5000, 10000 km.
 - **Zwei Wochenziele mit eigener Serie:** Laufziel (Standard 2 Läufe) und Aktivziel (Standard 150 Sportpunkte, wie Garmin/WHO), beide in der App einstellbar.
 - **Gamification:** Abzeichen für Serien (4, 12, 26, 52 Wochen), Bestmarken (längster Lauf, schnellster 5er, meiste Höhenmeter an einem Tag), Jahres-km (500, 1000, 2000), Allrounder (3 Sportarten in einer Woche), Wochenbilanz („beste Woche seit …“).
 - **Fitness-Stand = Laufökonomie-Trend:** Tempo im Verhältnis zum Puls über Monate, als Diagramm im Verlauf, als kurze Zeile in der Wochenansicht. VO2max liefert die API nicht.
@@ -220,7 +223,7 @@ Laufband-Läufe zählen fürs Laufziel. Indoor-Fahrten zählen zu Rad, haben abe
 
 | aktion | Liefert |
 |---|---|
-| `aktivitaeten` | alle Aktivitäten kompakt: `spalten` = `id, start, sportart, typ, name, km, min, minGesamt, hm, puls, gps`, `zeilen` = Liste von Listen. `start` als lokale Zeit `YYYY-MM-DDTHH:mm` |
+| `aktivitaeten` | alle Aktivitäten kompakt: `spalten` = `id, start, sportart, typ, name, km, min, minGesamt, hm, puls, gps, pkt, pktGeschaetzt, s1k, s5k, s10k, s21k`, `zeilen` = Liste von Listen. `start` als lokale Zeit `YYYY-MM-DDTHH:mm`. `pkt` = Sportpunkte (null vor 2023), `s…` = schnellste Abschnitte in Sekunden. Dazu `punkteAbJahr` und `punkteFaktoren` (Punkte pro Bewegungsminute je Sportart) |
 | `einstellungen` | `einstellungen` aus dem Blatt „Konfiguration“, fehlende werden mit Standardwert angelegt |
 | `einstellungSetzen` | ändert `schluessel` auf `wert` (nur bekannte Schlüssel, geprüft), liefert alle Einstellungen |
 | `status` | `letzterImport`, `letzterImportNeu`, `letzterFehler`, `anzahlAktivitaeten` |
@@ -294,9 +297,11 @@ Für v0.3:
 
 Für v0.4 (Script-Editor):
 
-1. `diagnoseDetails` ausführen und das Protokoll an Claude schicken (nur Zählungen).
+1. `diagnoseZusatzwerte` (bis 0.1.2: `diagnoseDetails`) ausführen und das Protokoll an Claude schicken (nur Zählungen).
 2. `detailsNachtragen` ausführen (ca. 30 s): füllt die neue Spalte `details` für alle Aktivitäten.
 3. In der App auf eine Aktivität tippen.
+
+Für v0.5: nichts einzurichten. Optional `webAppTesten` ausführen: loggt, wie viele Aktivitäten Sportpunkte haben, wie viele davon geschätzt sind, und die persönlichen Faktoren.
 
 ---
 
@@ -350,6 +355,7 @@ Für v0.4 (Script-Editor):
 
 | Version | Datum | Änderung |
 |---|---|---|
+| 0.5.0 | 2026-11-17 | v0.5 Sportpunkte und Erfolge: `gas/WebApp.gs` 0.5.0 (Sportpunkte ab 2023 mit Schätzung, schnellste Abschnitte in der Liste, Einstellung `wochenzielPunkte`, Standard 150), `gas/Diagnose.gs` 0.1.3 (`diagnoseZusatzwerte`). App 0.5.0: Aktivziel mit Serie in der Wochenansicht, Karte „Erfolge dieser Woche“ (Wochenbilanz, neue Abzeichen, Bestmarken, Jahres-km, Allrounder), Ansicht „Erfolge“ (Serien-Abzeichen 4/12/26/52, Bestzeiten, Bestmarken, Jahres-Kilometer, Allrounder), zweites Ziel in den Einstellungen, Sportpunkte in der Detailansicht, Trainingseffekt mit Garmins deutschen Begriffen, „Unknown“ ausgeblendet |
 | 0.4.0 | 2026-11-17 | v0.4 Detailansicht: `gas/Sammler.gs` 0.4.0 (Spalte `details`, `details_`, `detailsNachtragen`, Kopfzeile wird automatisch ergänzt), `gas/WebApp.gs` 0.4.0 (Aktion `details`), `gas/Diagnose.gs` 0.1.2 (`diagnoseDetails`), App 0.4.0 (`app.js`, `style.css`, `sw.js`). Entscheidungen zu Sportpunkten, zwei Zielen, Gamification und Fitness-Stand eingetragen, Fahrplan v0.4–v0.7 neu. Arbeitsregel „erst Feedback sammeln“. Rest des alten Schnittstellen-Entwurfs in Abschnitt 5 entfernt |
 | 0.1 | 2026-11-16 | Erste Projektbeschreibung aus der Planung im Chat |
 | 0.3.1 | 2026-11-17 | Knopf „Von Garmin holen“ in der App (Wochenansicht und Einstellungen), Rückmeldung mit Anzahl neuer Aktivitäten. `gas/WebApp.gs` 0.3.1 (Aktion `sammeln`), `gas/Sammler.gs` 0.2.2 (liefert Ergebnis, Fehler-Mail abschaltbar), App 0.3.1 (`app.js`, `style.css`, `sw.js`). Distanz abgerundet mit einer Nachkommastelle |
