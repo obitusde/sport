@@ -1,6 +1,6 @@
 # PROJEKT.md – Sport-Tracker (Arbeitstitel „sport")
 
-Version: 0.3.1 (2026-11-17) – v0.3 in Betrieb
+Version: 0.4.0 (2026-11-17) – v0.4 Detailansicht gebaut
 
 Dieses Dokument ist die Grundlage für die Entwicklung mit Claude Code. Es beschreibt Ziele, Architektur, Arbeitsweise und Fahrplan. Claude Code liest es vor jeder Arbeit und hält es aktuell.
 
@@ -114,6 +114,11 @@ Epix / Tacho → Garmin Connect (unverändert)
 - **Wochen-Serie:** Wochen in Folge mit erreichtem Laufziel. Die laufende Woche zählt mit, sobald das Ziel erreicht ist, und bricht die Serie nicht, solange sie offen ist. Rückwirkend gilt das aktuelle Wochenziel.
 - **Aktualisieren:** Nachts automatisch (3–4 Uhr), tagsüber nur von Hand über den Knopf „Von Garmin holen“ in der App. Kein stündlicher Abruf.
 - **Distanz in der App:** immer eine Nachkommastelle mit Komma, abgerundet (4,96 km → „4,9 km“).
+- **Detailansicht** (v0.4): Beim Tippen auf eine Aktivität holt die App die Spalte `details` über die Web-App und merkt sie sich auf dem Gerät. Die Liste bleibt dadurch klein.
+- **Sportpunkte = Garmins Intensitätsminuten** (entschieden 2026-11-17): moderate Minuten ×1, intensive ×2, aus den Aktivitäten (`moderateIntensityMinutes`, `vigorousIntensityMinutes`). Pulsbasiert, dadurch sportartübergreifend vergleichbar: Eine lange Wanderung oder ein Skitag zählt wie entsprechend viele Läufe. Minuten im Alltag ohne Aktivität zählen nicht. Fehlen die Werte bei alten Aktivitäten, werden sie geschätzt (Entscheidung nach `diagnoseDetails`).
+- **Zwei Wochenziele mit eigener Serie:** Laufziel (Standard 2 Läufe) und Aktivziel (Standard 150 Sportpunkte, wie Garmin/WHO), beide in der App einstellbar.
+- **Gamification:** Abzeichen für Serien (4, 12, 26, 52 Wochen), Bestmarken (längster Lauf, schnellster 5er, meiste Höhenmeter an einem Tag), Jahres-km (500, 1000, 2000), Allrounder (3 Sportarten in einer Woche), Wochenbilanz („beste Woche seit …“).
+- **Fitness-Stand = Laufökonomie-Trend:** Tempo im Verhältnis zum Puls über Monate, als Diagramm im Verlauf, als kurze Zeile in der Wochenansicht. VO2max liefert die API nicht.
 - **App ohne Build-Schritt:** schlichtes HTML/CSS/JavaScript in `/docs`, GitHub Pages veröffentlicht direkt.
 - **Deployment per GitHub Action schon ab v0.1** (statt erst v0.2). Die Skript-ID steht als Repo-Variable `GAS_SCRIPT_ID`, die Action erzeugt daraus `gas/.clasp.json`. clasp-Version fest: `@google/clasp@3.4.1`.
 - **Diagnose-Protokolle ohne Werte:** Die Diagnose loggt standardmäßig nur Struktur und Zählungen (`WERTE_LOGGEN = false`), damit das Protokoll keine Aktivitätsdaten enthält.
@@ -161,8 +166,26 @@ Regeln:
 | puls_avg | Durchschnittspuls, falls vorhanden |
 | geraet | Hersteller laut Garmin (`manufacturer`), ein Gerätemodell liefert die API nicht |
 | hat_gps | `true`, wenn eine Startkoordinate vorhanden ist |
-| spur_datei | Drive-Datei-ID der GeoJSON-Spur (ab v0.5, bis dahin leer) |
+| spur_datei | Drive-Datei-ID der GeoJSON-Spur (ab v0.7, bis dahin leer) |
 | importiert_am | Zeitpunkt des Imports |
+| details | JSON mit Zusatzwerten für die Detailansicht (ab v0.4), siehe unten |
+
+### Spalte „details“ (JSON, nur vorhandene Werte)
+
+| Schlüssel | Garmin-Feld | Einheit |
+|---|---|---|
+| pulsMax | maxHR | Schläge/min |
+| zonenMin | hrTimeInZone_1…5 | Minuten je Zone |
+| teAerob, teAnaerob, teLabel | aerobicTrainingEffect, anaerobicTrainingEffect, trainingEffectLabel | 0–5, Text |
+| belastung | activityTrainingLoad | – |
+| imModerat, imIntensiv | moderateIntensityMinutes, vigorousIntensityMinutes | Minuten |
+| kadenzLauf, kadenzRad | averageRunningCadenceInStepsPerMinute, averageBikingCadenceInRevPerMinute | Schritte/min, U/min |
+| schrittlaengeCm, bodenkontaktMs, vertOszCm, vertVerhaeltnis | avgStrideLength, avgGroundContactTime, avgVerticalOscillation, avgVerticalRatio | cm, ms, cm, % |
+| kalorien, hmAb, hoeheMax | calories, elevationLoss, maxElevation | kcal, m, m |
+| vSchnittMs, vMaxMs, vGapMs | averageSpeed, maxSpeed, avgGradeAdjustedSpeed | m/s |
+| split1kS … split42kS | fastestSplit_1000, _5000, _10000, _21098, _42195 | Sekunden |
+| bodyBattery, leistungW, leistungNormW, schritte | differenceBodyBattery, avgPower, normPower, steps | –, W, W, – |
+| tempMin, tempMax, ort | minTemperature, maxTemperature, locationName | °C, Text |
 
 ### Zuordnung Garmin-Typ → Sportart (festgelegt 2026-11-17)
 
@@ -202,20 +225,11 @@ Laufband-Läufe zählen fürs Laufziel. Indoor-Fahrten zählen zu Rad, haben abe
 | `einstellungSetzen` | ändert `schluessel` auf `wert` (nur bekannte Schlüssel, geprüft), liefert alle Einstellungen |
 | `status` | `letzterImport`, `letzterImportNeu`, `letzterFehler`, `anzahlAktivitaeten` |
 | `sammeln` | startet den Sammler sofort (ohne Fehler-Mail), liefert `neu` und `proSportart`. Für den Knopf „Von Garmin holen“ |
-| `spuren`, `spur` | ab v0.5 |
+| `details` | Zusatzwerte einer Aktivität (`id`) aus der Spalte `details`: `{id, details: {…}}`, leeres Objekt, wenn nichts da ist |
+| `spuren`, `spur` | ab v0.7 |
 
 Antwort immer JSON: `{ok: true, version, …}` oder `{ok: false, fehler}`. Ohne gültiges Token: `{ok: false, fehler: "nicht berechtigt"}`.
 Die Web-App läuft als Christof („Ausführen als: Ich“) mit Zugriff „Jeder“; geschützt ist sie allein durch das Token.
-
----|---|
-| `aktivitaeten` | Liste, optional `von`, `bis`, `sportart` |
-| `woche` | Summen der aktuellen Woche und Stand des Laufziels |
-| `verlauf` | Summen pro Woche/Monat/Jahr |
-| `spuren` | vereinfachte Spuren als GeoJSON, optional `sportart`, `jahr` |
-| `spur` | volle Spur einer Aktivität (`id`) |
-| `status` | letzter Import, Fehler, Ablaufdatum Garmin-Schlüssel (falls bekannt) |
-
-Antwort immer JSON. Endgültig festgelegt in v0.2.
 
 ---
 
@@ -278,6 +292,12 @@ Für v0.3:
 5. GitHub → Settings → Pages: Source „Deploy from a branch“, Branch `main`, Ordner `/docs` → Save. App-Adresse: https://obitusde.github.io/sport/
 6. App am Handy öffnen, unter Einstellungen Web-App-URL und Token eintragen, „Zum Startbildschirm hinzufügen“.
 
+Für v0.4 (Script-Editor):
+
+1. `diagnoseDetails` ausführen und das Protokoll an Claude schicken (nur Zählungen).
+2. `detailsNachtragen` ausführen (ca. 30 s): füllt die neue Spalte `details` für alle Aktivitäten.
+3. In der App auf eine Aktivität tippen.
+
 ---
 
 ## 8. Arbeitsregeln für Claude Code
@@ -290,6 +310,7 @@ Für v0.3:
 - Bei Unsicherheit ehrlich sagen, was unbekannt ist. Garmin-Endpunkte und -Felder nicht raten, sondern in der Swagger-Doku nachsehen oder per Diagnose prüfen.
 - Keine Schlüssel, Tokens oder Aktivitätsdaten ins Repo.
 - Architektur vor dem Coden besprechen, wenn sich etwas Grundsätzliches ändert.
+- **Erst Feedback sammeln, dann bauen:** Vorschläge besprechen, eine neue Version erst bauen, wenn Christof sie freigibt („los“).
 - Dieses Dokument nach jeder Version aktualisieren (Stand, Entscheidungen, Änderungsliste).
 
 ---
@@ -301,9 +322,10 @@ Für v0.3:
 | v0.1 | Diagnose: Token holen, Aktivitäten der letzten 30 Tage listen, eine Aktivität im Detail und als FIT laden, FIT auf GPS scannen, Historie zählen, alles loggen. Deployment per GitHub Action | Klarheit über Endpunkte, Felder, GPS, Historie |
 | v0.2 | Sammler + Sheet + Zeitgeber + Fehler-Mail | Ziel 1 erfüllt |
 | v0.3 | Web-App + PWA: Wochenansicht, Laufziel, Wochen-Serie | Ziele 2 und 3 |
-| v0.4 | Verlauf: Wochen/Monate/Jahre | Ziel 4 |
-| v0.5 | Karte mit allen Spuren, Filter nach Sportart und Jahr | Ziel 5 |
-| v0.6 | Spuren der Historie nachladen (Liste ist schon vollständig, siehe v0.2) | Vollständige Karte |
+| v0.4 | Detailansicht: Pace, Puls und Pulszonen, Trainingseffekt, Intensitätsminuten, Laufstil, schnellste Abschnitte. Spalte `details` mit Nachtrag, Diagnose der Intensitätsminuten | Mehr Einblick pro Aktivität |
+| v0.5 | Sportpunkte (Intensitätsminuten), Aktivziel 150 mit Serie, Abzeichen und Bestmarken | Motivation über alle Sportarten |
+| v0.6 | Verlauf: Wochen/Monate/Jahre je Sportart, Laufökonomie-Trend | Ziel 4, Fitness-Stand |
+| v0.7 | Karte mit allen Spuren, Filter nach Sportart und Jahr, Spuren der Historie nachladen | Ziel 5 |
 
 ### Ideen für später
 
@@ -328,6 +350,7 @@ Für v0.3:
 
 | Version | Datum | Änderung |
 |---|---|---|
+| 0.4.0 | 2026-11-17 | v0.4 Detailansicht: `gas/Sammler.gs` 0.4.0 (Spalte `details`, `details_`, `detailsNachtragen`, Kopfzeile wird automatisch ergänzt), `gas/WebApp.gs` 0.4.0 (Aktion `details`), `gas/Diagnose.gs` 0.1.2 (`diagnoseDetails`), App 0.4.0 (`app.js`, `style.css`, `sw.js`). Entscheidungen zu Sportpunkten, zwei Zielen, Gamification und Fitness-Stand eingetragen, Fahrplan v0.4–v0.7 neu. Arbeitsregel „erst Feedback sammeln“. Rest des alten Schnittstellen-Entwurfs in Abschnitt 5 entfernt |
 | 0.1 | 2026-11-16 | Erste Projektbeschreibung aus der Planung im Chat |
 | 0.3.1 | 2026-11-17 | Knopf „Von Garmin holen“ in der App (Wochenansicht und Einstellungen), Rückmeldung mit Anzahl neuer Aktivitäten. `gas/WebApp.gs` 0.3.1 (Aktion `sammeln`), `gas/Sammler.gs` 0.2.2 (liefert Ergebnis, Fehler-Mail abschaltbar), App 0.3.1 (`app.js`, `style.css`, `sw.js`). Distanz abgerundet mit einer Nachkommastelle |
 | 0.3.0 | 2026-11-17 | v0.3: `gas/WebApp.gs` 0.3.0 (doGet mit Token, Aktionen aktivitaeten, einstellungen, einstellungSetzen, status, Diagnose `webAppTesten`), `appsscript.json` mit Web-App-Einstellungen. App in `/docs` 0.3.0: Wochenansicht (Laufziel, was noch fehlt, Serie, Tage, Sport je Sportart, Aktivitäten, frühere Wochen), Einstellungen (Wochenziel, Verbindung, Datenstand), offline-fähig. Entscheidungen: App rechnet, Einstellungen im Sheet. Abschnitt 5 festgelegt |

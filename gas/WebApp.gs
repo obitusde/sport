@@ -1,6 +1,6 @@
 /**
  * WebApp.gs – v0.3: Schnittstelle für die App (JSON)
- * Version: 0.3.1 (2026-11-17)
+ * Version: 0.4.0 (2026-11-17)
  *
  * Aufruf: GET <webapp-url>?token=<WEBAPP_TOKEN>&aktion=<aktion>&...
  *
@@ -11,6 +11,7 @@
  * | einstellungSetzen | ändert eine Einstellung (schluessel, wert), liefert alle neu    |
  * | status            | letzter Import, letzter Fehler, Anzahl Aktivitäten             |
  * | sammeln           | holt neue Aktivitäten von Garmin ins Sheet: {neu, proSportart} |
+ * | details           | Zusatzwerte einer Aktivität (id): {id, details: {…}}            |
  *
  * Jede Antwort ist JSON: {ok: true, version, …} oder {ok: false, fehler}.
  * Ohne gültiges Token liefert die Web-App keine Daten.
@@ -20,9 +21,10 @@
  *
  * Änderungen 0.3.1: Aktion „sammeln“ für den Knopf „Von Garmin holen“ (ohne Fehler-Mail,
  * der Fehler geht direkt an die App).
+ * Änderungen 0.4.0: Aktion „details“ für die Detailansicht der App.
  */
 
-const WEBAPP_VERSION = '0.3.1';
+const WEBAPP_VERSION = '0.4.0';
 const BLATT_KONFIGURATION = 'Konfiguration';
 
 /**
@@ -89,6 +91,11 @@ function webAppTesten() {
     if (aktion === 'aktivitaeten' && daten.ok) info += ', Zeilen: ' + daten.zeilen.length + ', Spalten: ' + daten.spalten.join(',');
     if (aktion === 'einstellungen' && daten.ok) info += ', Schlüssel: ' + Object.keys(daten.einstellungen).join(',');
     log_(aktion + ': ' + info);
+    if (aktion === 'aktivitaeten' && daten.ok && daten.zeilen.length) {
+      const id = daten.zeilen[daten.zeilen.length - 1][0];
+      const det = JSON.parse(doGet({ parameter: { token: token, aktion: 'details', id: id } }).getContent());
+      log_('details (neueste Aktivität): ok=' + det.ok + (det.ok ? ', Felder: ' + Object.keys(det.details).join(',') : ', fehler=' + det.fehler));
+    }
   });
   log_('Web-App-URL der aktuellen Bereitstellung: ' + (ScriptApp.getService().getUrl() || 'noch nicht bereitgestellt'));
 }
@@ -109,6 +116,8 @@ function aktionAusfuehren_(p) {
       return Object.assign(basis, { einstellungen: einstellungenLesen_() });
     case 'status':
       return Object.assign(basis, statusDaten_());
+    case 'details':
+      return Object.assign(basis, { id: String(p.id), details: detailsLesen_(p.id) });
     case 'sammeln': {
       const e = sammelnIntern_(false, { mail: false });
       if (e.fehler) throw new Error(e.fehler);
@@ -147,6 +156,23 @@ function aktivitaetenKompakt_() {
     ];
   });
   return { spalten: APP_SPALTEN, zeilen: zeilen };
+}
+
+/** Liest die Spalte „details“ einer Aktivität. Leeres Objekt, wenn nichts da ist. */
+function detailsLesen_(id) {
+  if (!/^\d+$/.test(String(id || ''))) throw new Error('ungültige id');
+  const b = tabelle_().getSheetByName(BLATT_AKTIVITAETEN);
+  if (!b || b.getLastRow() < 2) throw new Error('Aktivität nicht gefunden');
+  const treffer = b.getRange(2, 1, b.getLastRow() - 1, 1)
+    .createTextFinder(String(id)).matchEntireCell(true).findNext();
+  if (!treffer) throw new Error('Aktivität nicht gefunden');
+  const text = b.getRange(treffer.getRow(), SPALTEN.indexOf('details') + 1).getValue();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    return {};
+  }
 }
 
 function statusDaten_() {

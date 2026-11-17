@@ -1,6 +1,6 @@
 /**
  * Diagnose.gs – Diagnose der Garmin Connect Personal API
- * Version: 0.1.1 (2026-11-17)
+ * Version: 0.1.2 (2026-11-17)
  *
  * Nur Diagnose: Alle Funktionen loggen, nichts wird gespeichert.
  * Nutzt Garmin.gs und Hilfen.gs.
@@ -19,6 +19,10 @@
  * - metadataDTO.fileFormat wird mit Wert geloggt (nur Dateiformat, keine persönlichen Daten).
  * - Token, Abruf und Hilfsfunktionen liegen jetzt in Garmin.gs und Hilfen.gs.
  * - diagnoseAlles() ohne Historie (ist geklärt), diagnoseHistorie() bleibt einzeln aufrufbar.
+ *
+ * Änderungen 0.1.2: diagnoseDetails() zählt, wie oft Garmin die Zusatzwerte für die
+ * Detailansicht und die Intensitätsminuten liefert (pro Sportart und Jahr), und listet
+ * die vorkommenden Trainingseffekt-Labels. Nur Zählungen, keine Werte.
  */
 
 const WERTE_LOGGEN = false;
@@ -376,4 +380,50 @@ function diagnoseHistorie() {
   log_('Pro Jahr: ' + Object.keys(proJahr).sort().map(function (j) { return j + '=' + proJahr[j]; }).join(', '));
   log_('Pro Garmin-Typ: ' + Object.keys(proTyp).sort(function (x, y) { return proTyp[y] - proTyp[x]; })
     .map(function (t) { return t + '=' + proTyp[t]; }).join(', '));
+}
+
+// ---------------------------------------------------------------------------
+// 6. Zusatzwerte für die Detailansicht und Intensitätsminuten (v0.4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Zählt über die ganze Historie, wie oft die Zusatzwerte vorhanden sind.
+ * Loggt nur Anzahlen und die Namen der Trainingseffekt-Labels.
+ */
+function diagnoseDetails() {
+  log_('--- 6. Zusatzwerte (Details) ---');
+  const alle = garminAktivitaeten_();
+  log_('Aktivitäten: ' + alle.length);
+
+  const felder = ['averageHR', 'maxHR', 'hrTimeInZone_1', 'aerobicTrainingEffect', 'trainingEffectLabel',
+    'activityTrainingLoad', 'moderateIntensityMinutes', 'vigorousIntensityMinutes',
+    'averageRunningCadenceInStepsPerMinute', 'avgStrideLength', 'avgGroundContactTime',
+    'avgGradeAdjustedSpeed', 'fastestSplit_1000', 'fastestSplit_5000', 'calories', 'differenceBodyBattery'];
+
+  const proSportart = {};
+  const imProJahr = {};
+  const labels = {};
+  alle.forEach(function (a) {
+    const sa = sportart_(typKey_(a));
+    const s = proSportart[sa] || (proSportart[sa] = { gesamt: 0 });
+    s.gesamt++;
+    felder.forEach(function (f) {
+      if (a[f] !== undefined && a[f] !== null) s[f] = (s[f] || 0) + 1;
+    });
+    const jahr = String(a.startTimeLocal || '????').substring(0, 4);
+    const j = imProJahr[jahr] || (imProJahr[jahr] = { gesamt: 0, mitIm: 0, mitPuls: 0 });
+    j.gesamt++;
+    if (typeof a.moderateIntensityMinutes === 'number' || typeof a.vigorousIntensityMinutes === 'number') j.mitIm++;
+    if (typeof a.averageHR === 'number') j.mitPuls++;
+    if (a.trainingEffectLabel) labels[a.trainingEffectLabel] = (labels[a.trainingEffectLabel] || 0) + 1;
+  });
+
+  Object.keys(proSportart).forEach(function (sa) {
+    const s = proSportart[sa];
+    log_(sa + ' (' + s.gesamt + '): ' + felder.map(function (f) { return f + '=' + (s[f] || 0); }).join(', '));
+  });
+  log_('Intensitätsminuten pro Jahr (mit IM / mit Puls / gesamt): ' + Object.keys(imProJahr).sort().map(function (j) {
+    return j + '=' + imProJahr[j].mitIm + '/' + imProJahr[j].mitPuls + '/' + imProJahr[j].gesamt;
+  }).join(', '));
+  log_('Trainingseffekt-Labels: ' + (Object.keys(labels).map(function (l) { return l + '=' + labels[l]; }).join(', ') || 'keine'));
 }

@@ -1,6 +1,6 @@
 /**
- * Sammler.gs – v0.2: Aktivitäten von Garmin ins Sheet „Aktivitaeten" übernehmen
- * Version: 0.2.2 (2026-11-17)
+ * Sammler.gs – Aktivitäten von Garmin ins Sheet „Aktivitaeten" übernehmen
+ * Version: 0.4.0 (2026-11-17)
  *
  * Funktionen zum Ausführen im Script-Editor:
  * - sammelnTrockenlauf()  Diagnose: holt die Daten, schreibt nichts, loggt nur Zählungen
@@ -8,6 +8,7 @@
  * - zeitgeberEinrichten() richtet den täglichen Lauf um ca. 03:00 Europe/Zurich ein
  * - statusZeigen()        loggt letzten Import, letzten Fehler, Sheet-Link und Zeitgeber
  * - sportartenNeuBerechnen() setzt die Sportart aller Zeilen neu aus dem Garmin-Typ
+ * - detailsNachtragen()   füllt die Spalte „details“ für alle Aktivitäten (einmalig nach v0.4)
  *
  * Ablauf von sammeln():
  * - Beim ersten Lauf (Sheet leer) wird die ganze Historie geholt.
@@ -20,6 +21,9 @@
  * Änderungen 0.2.1: neue Sportart „schwimmen“, Sportart wird bei jedem Lauf nachberechnet.
  * Änderungen 0.2.2: sammelnIntern_ liefert ein Ergebnis zurück und kann ohne Fehler-Mail
  *   laufen. Die Web-App nutzt das für den Knopf „Von Garmin holen“ in der App.
+ * Änderungen 0.4.0: neue Spalte „details“ (JSON mit Puls, Pulszonen, Trainingseffekt,
+ *   Intensitätsminuten, Laufstil, Bestzeiten …), detailsNachtragen(). Eine bestehende
+ *   Kopfzeile ohne „details“ wird automatisch ergänzt.
  *
  * Das Sheet „Sport-Daten" legt das Skript beim ersten Lauf selbst an und merkt sich
  * die ID in der Script Property SHEET_ID. Ein bestehendes Sheet kann genutzt werden,
@@ -36,7 +40,7 @@ const NACHLAUF_TAGE = 14;
 const ZEITGEBER_STUNDE = 3;
 
 const SPALTEN = ['activityId', 'start', 'sportart', 'garminTyp', 'name', 'distanz_km', 'dauer_min',
-  'dauer_gesamt_min', 'hoehenmeter', 'puls_avg', 'geraet', 'hat_gps', 'spur_datei', 'importiert_am'];
+  'dauer_gesamt_min', 'hoehenmeter', 'puls_avg', 'geraet', 'hat_gps', 'spur_datei', 'importiert_am', 'details'];
 
 /**
  * Zuordnung Garmin-Typ → Sportart. Alles, was hier nicht steht, wird „andere“.
@@ -141,7 +145,7 @@ function sammelnIntern_(trocken, optionen) {
   const t0 = Date.now();
 
   try {
-    log_('===== Sammler v0.2.2 ' + (trocken ? 'TROCKENLAUF (schreibt nichts)' : 'gestartet') + ' =====');
+    log_('===== Sammler v0.4.0 ' + (trocken ? 'TROCKENLAUF (schreibt nichts)' : 'gestartet') + ' =====');
     const blatt = trocken ? blattOhneAnlegen_() : blatt_();
     const bekannt = bekannteIds_(blatt);
     const voll = bekannt.size === 0;
@@ -244,8 +248,94 @@ function zeile_(a, sportart, jetzt) {
     a.manufacturer || '',
     hatGps_(a),
     '',
-    jetzt
+    jetzt,
+    JSON.stringify(details_(a))
   ];
+}
+
+/**
+ * Zusatzwerte einer Aktivität für die Detailansicht, kompakt als Objekt.
+ * Nur Felder, die Garmin liefert, kommen hinein. Einheiten laut Swagger-Doku.
+ * @param {Object} a SummarizedActivityDTO
+ * @return {Object}
+ */
+function details_(a) {
+  const d = {};
+  const setze = function (schluessel, wert, stellen) {
+    if (typeof wert === 'number' && isFinite(wert)) d[schluessel] = runden_(wert, stellen);
+    else if (typeof wert === 'string' && wert) d[schluessel] = wert;
+  };
+  setze('pulsMax', a.maxHR, 0);                                   // Schläge/min
+  const zonen = [1, 2, 3, 4, 5].map(function (i) { return a['hrTimeInZone_' + i]; });
+  if (zonen.some(function (z) { return typeof z === 'number'; })) {
+    d.zonenMin = zonen.map(function (z) { return typeof z === 'number' ? runden_(z / 60, 1) : 0; });
+  }
+  setze('teAerob', a.aerobicTrainingEffect, 1);
+  setze('teAnaerob', a.anaerobicTrainingEffect, 1);
+  setze('teLabel', a.trainingEffectLabel);
+  setze('belastung', a.activityTrainingLoad, 0);
+  setze('imModerat', a.moderateIntensityMinutes, 0);              // Minuten
+  setze('imIntensiv', a.vigorousIntensityMinutes, 0);             // Minuten
+  setze('kadenzLauf', a.averageRunningCadenceInStepsPerMinute, 0); // Schritte/min
+  setze('kadenzRad', a.averageBikingCadenceInRevPerMinute, 0);    // U/min
+  setze('schrittlaengeCm', a.avgStrideLength, 0);
+  setze('bodenkontaktMs', a.avgGroundContactTime, 0);
+  setze('vertOszCm', a.avgVerticalOscillation, 1);
+  setze('vertVerhaeltnis', a.avgVerticalRatio, 1);                // %
+  setze('kalorien', a.calories, 0);
+  setze('hmAb', a.elevationLoss, 0);
+  setze('hoeheMax', a.maxElevation, 0);
+  setze('vSchnittMs', a.averageSpeed, 3);                         // m/s
+  setze('vMaxMs', a.maxSpeed, 3);                                 // m/s
+  setze('vGapMs', a.avgGradeAdjustedSpeed, 3);                    // m/s, steigungsbereinigt
+  setze('split1kS', a.fastestSplit_1000, 0);                      // Sekunden
+  setze('split5kS', a.fastestSplit_5000, 0);
+  setze('split10kS', a.fastestSplit_10000, 0);
+  setze('split21kS', a.fastestSplit_21098, 0);
+  setze('split42kS', a.fastestSplit_42195, 0);
+  setze('bodyBattery', a.differenceBodyBattery, 0);
+  setze('leistungW', a.avgPower, 0);
+  setze('leistungNormW', a.normPower, 0);
+  setze('schritte', a.steps, 0);
+  setze('tempMin', a.minTemperature, 0);                          // °C
+  setze('tempMax', a.maxTemperature, 0);
+  setze('ort', a.locationName);
+  return d;
+}
+
+/**
+ * Füllt die Spalte „details“ für alle Aktivitäten im Sheet. Holt dafür die ganze
+ * Historie von Garmin (ca. 25 s). Kann gefahrlos mehrfach laufen.
+ */
+function detailsNachtragen() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    log_('Ein anderer Lauf ist noch aktiv. Abbruch.');
+    return;
+  }
+  try {
+    log_('===== Details nachtragen =====');
+    const b = blatt_();
+    const n = b.getLastRow() - 1;
+    if (n < 1) {
+      log_('Sheet ist leer.');
+      return;
+    }
+    const proId = {};
+    garminAktivitaeten_().forEach(function (a) { proId[String(a.activityId)] = JSON.stringify(details_(a)); });
+    const ids = b.getRange(2, 1, n, 1).getValues();
+    let gefunden = 0;
+    const werte = ids.map(function (z) {
+      const json = proId[String(z[0])];
+      if (json) gefunden++;
+      return [json || '{}'];
+    });
+    b.getRange(2, SPALTEN.indexOf('details') + 1, n, 1).setValues(werte);
+    log_('Details geschrieben: ' + gefunden + ' von ' + n + ' Zeilen' +
+      (gefunden < n ? ' (' + (n - gefunden) + ' nicht mehr bei Garmin gefunden)' : '') + '.');
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -278,7 +368,14 @@ function blatt_() {
     b.setFrozenRows(1);
   } else {
     const kopf = b.getRange(1, 1, 1, SPALTEN.length).getValues()[0];
-    if (kopf.join('|') !== SPALTEN.join('|')) {
+    // Neue Spalten am Ende (z. B. „details“ ab v0.4) automatisch ergänzen
+    const vorhanden = kopf.filter(function (k) { return k !== ''; }).length;
+    const passtBisher = kopf.slice(0, vorhanden).join('|') === SPALTEN.slice(0, vorhanden).join('|');
+    if (passtBisher && vorhanden < SPALTEN.length && kopf.slice(vorhanden).every(function (k) { return k === ''; })) {
+      b.getRange(1, vorhanden + 1, 1, SPALTEN.length - vorhanden)
+        .setValues([SPALTEN.slice(vorhanden)]).setFontWeight('bold');
+      log_('Kopfzeile ergänzt um: ' + SPALTEN.slice(vorhanden).join(', '));
+    } else if (kopf.join('|') !== SPALTEN.join('|')) {
       throw new Error('Kopfzeile im Blatt „' + BLATT_AKTIVITAETEN + '“ passt nicht zu den erwarteten Spalten.');
     }
   }

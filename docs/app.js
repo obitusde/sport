@@ -1,6 +1,6 @@
 /**
  * app.js – Sport-App
- * Version: 0.3.1 (2026-11-17)
+ * Version: 0.4.0 (2026-11-17)
  *
  * Ansichten: Woche, Einstellungen.
  * Die App holt die Aktivitäten als Liste von der Apps-Script-Web-App und rechnet
@@ -12,17 +12,21 @@
  * startet den Sammler über die Web-App, lädt danach neu und meldet die Anzahl neuer
  * Aktivitäten. Ersetzt „Jetzt neu laden“. Distanz immer mit einer Nachkommastelle,
  * abgerundet (4,96 km → „4,9 km“).
+ * Änderungen 0.4.0: Detailansicht beim Tippen auf eine Aktivität (Tempo, Puls und
+ * Pulszonen, Trainingseffekt, Intensitätsminuten, Laufstil, Bestzeiten). Details werden
+ * beim ersten Öffnen von der Web-App geholt und auf dem Gerät gespeichert.
  */
 'use strict';
 
-const APP_VERSION = '0.3.1';
+const APP_VERSION = '0.4.0';
 
 const SPEICHER = {
   url: 'sport.url',
   token: 'sport.token',
   daten: 'sport.daten',
   einstellungen: 'sport.einstellungen',
-  status: 'sport.status'
+  status: 'sport.status',
+  details: 'sport.details'
 };
 
 /** Sportarten in Anzeigereihenfolge. */
@@ -53,7 +57,10 @@ const zustand = {
   status: null,
   webAppVersion: null,
   laedt: false, // false, 'garmin' (Sammler läuft) oder 'daten' (Liste wird geladen)
-  fehler: null
+  fehler: null,
+  detailId: null,
+  detailLaedt: false,
+  detailFehler: null
 };
 
 // ---------------------------------------------------------------------------
@@ -398,14 +405,15 @@ function ansichtWoche() {
     w.tage.filter(t => t.aktivitaeten.length).forEach(t => {
       html += `<div class="liste-tag">${TAGE_KURZ[(t.datum.getDay() + 6) % 7]} ${t.datum.getDate()}. ${MONATE[t.datum.getMonth()]}</div>`;
       t.aktivitaeten.forEach(a => {
-        html += `<div class="eintrag" style="--farbe: var(--${esc(a.sportart)})">
+        html += `<button type="button" class="eintrag" data-aktion="detail" data-id="${esc(a.id)}" style="--farbe: var(--${esc(a.sportart)})">
           <span class="eintrag-marke" aria-hidden="true"></span>
-          <div class="eintrag-text">
-            <div class="eintrag-name">${esc(a.name || SPORT_NAME[a.sportart] || a.typ)}</div>
-            <div class="eintrag-werte">${esc(SPORT_NAME[a.sportart] || a.sportart)}${wertListe(a) ? ' · ' + wertListe(a) : ''}</div>
-          </div>
+          <span class="eintrag-text">
+            <span class="eintrag-name">${esc(a.name || SPORT_NAME[a.sportart] || a.typ)}</span>
+            <span class="eintrag-werte">${esc(SPORT_NAME[a.sportart] || a.sportart)}${wertListe(a) ? ' · ' + wertListe(a) : ''}</span>
+          </span>
           <span class="eintrag-zeit">${uhrzeit(a.datum)}</span>
-        </div>`;
+          <svg class="eintrag-pfeil" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+        </button>`;
       });
     });
     html += '</div>';
@@ -553,14 +561,202 @@ function ansichtEinstellungen() {
 }
 
 // ---------------------------------------------------------------------------
+// Detailansicht
+// ---------------------------------------------------------------------------
+
+const ZONEN = [
+  { name: 'Zone 1', text: 'Aufwärmen' },
+  { name: 'Zone 2', text: 'Leicht' },
+  { name: 'Zone 3', text: 'Aerob' },
+  { name: 'Zone 4', text: 'Schwelle' },
+  { name: 'Zone 5', text: 'Maximum' }
+];
+
+/** Garmin-Trainingseffekt-Labels; unbekannte werden lesbar gemacht. */
+const TE_LABEL = {
+  RECOVERY: 'Erholung', AEROBIC_BASE: 'Grundlage', TEMPO: 'Tempo', LACTATE_THRESHOLD: 'Laktatschwelle',
+  THRESHOLD: 'Schwelle', VO2MAX: 'VO2max', ANAEROBIC_CAPACITY: 'Anaerobe Kapazität', SPEED: 'Schnelligkeit',
+  SPRINT: 'Sprint', NO_BENEFIT: 'Kein Nutzen'
+};
+
+function teLabel(label) {
+  if (!label) return '';
+  return TE_LABEL[label] || label.toLowerCase().replace(/_/g, ' ').replace(/^./, c => c.toUpperCase());
+}
+
+/** Garmin-Skala für den Trainingseffekt (0–5). */
+function teText(wert) {
+  if (wert >= 5) return 'Überlastend';
+  if (wert >= 4) return 'Stark verbessernd';
+  if (wert >= 3) return 'Verbessernd';
+  if (wert >= 2) return 'Erhaltend';
+  if (wert >= 1) return 'Geringer Effekt';
+  return 'Kein Effekt';
+}
+
+const dezimal1 = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const dezimal2 = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** Sekunden → „4:52“ bzw. „1:04:12“. */
+function zeitAusSekunden(s) {
+  const g = Math.round(s);
+  const h = Math.floor(g / 3600);
+  const m = Math.floor((g % 3600) / 60);
+  const sek = String(g % 60).padStart(2, '0');
+  return h ? h + ':' + String(m).padStart(2, '0') + ':' + sek : m + ':' + sek;
+}
+
+/** Pace in min/km aus Sekunden pro km. */
+function pace(sekProKm) {
+  return zeitAusSekunden(sekProKm) + ' /km';
+}
+
+function gespeicherteDetails() {
+  return lesen(SPEICHER.details, {});
+}
+
+async function detailOeffnen(id) {
+  zustand.ansicht = 'detail';
+  zustand.detailId = id;
+  zustand.detailFehler = null;
+  history.pushState({ detail: id }, '');
+  window.scrollTo(0, 0);
+  if (gespeicherteDetails()[id]) {
+    zeichnen();
+    return;
+  }
+  zustand.detailLaedt = true;
+  zeichnen();
+  try {
+    const antwort = await api('details', { id: id });
+    // Nur gefüllte Details merken; leere kommen evtl. nach „detailsNachtragen“ noch
+    if (Object.keys(antwort.details || {}).length) {
+      const alle = gespeicherteDetails();
+      alle[id] = antwort.details;
+      schreiben(SPEICHER.details, alle);
+    }
+  } catch (e) {
+    zustand.detailFehler = e.message;
+  } finally {
+    zustand.detailLaedt = false;
+    if (zustand.detailId === id) zeichnen();
+  }
+}
+
+function kennzahl(wert, name) {
+  return `<div class="kz"><div class="kz-wert">${wert}</div><div class="kz-name">${name}</div></div>`;
+}
+
+function zeile(name, wert) {
+  return `<tr><td>${name}</td><td>${wert}</td></tr>`;
+}
+
+function ansichtDetail() {
+  const a = zustand.aktivitaeten.find(x => x.id === zustand.detailId);
+  const zurueck = `<button class="knopf klein zurueck" data-aktion="zurueck">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg> Zurück</button>`;
+  if (!a) return zurueck + '<div class="karte leer">Aktivität nicht gefunden.</div>';
+
+  const d = gespeicherteDetails()[a.id] || {};
+  const lauf = a.sportart === 'laufen' || a.sportart === 'wandern';
+  const datumText = TAGE_KURZ[(a.datum.getDay() + 6) % 7] + ' ' + a.datum.getDate() + '. ' +
+    MONATE[a.datum.getMonth()] + ' ' + a.datum.getFullYear() + ', ' + uhrzeit(a.datum);
+
+  let html = zurueck + `<header class="detail-kopf" style="--farbe: var(--${esc(a.sportart)})">
+    <span class="detail-marke" aria-hidden="true"></span>
+    <div><h1>${esc(a.name || SPORT_NAME[a.sportart])}</h1>
+    <span class="leise">${esc(SPORT_NAME[a.sportart] || a.sportart)} · ${datumText}${d.ort ? ' · ' + esc(d.ort) : ''}</span></div>
+  </header>`;
+
+  // Kennzahlen
+  const kz = [];
+  if (a.km) kz.push(kennzahl(km(a.km), 'Distanz'));
+  if (a.min) kz.push(kennzahl(dauer(a.min), 'Bewegungszeit'));
+  if (a.km && a.min) {
+    if (a.sportart === 'schwimmen') kz.push(kennzahl(zeitAusSekunden(a.min * 60 / (a.km * 10)) + ' /100 m', 'Ø Tempo'));
+    else if (lauf) kz.push(kennzahl(pace(a.min * 60 / a.km), 'Ø Pace'));
+    else kz.push(kennzahl(dezimal1.format(a.km / (a.min / 60)) + ' km/h', 'Ø Geschwindigkeit'));
+  }
+  if (a.hm) kz.push(kennzahl(zahlFormat0.format(a.hm) + (d.hmAb ? ' / ' + zahlFormat0.format(d.hmAb) : '') + ' m', d.hmAb ? 'Höhenmeter auf / ab' : 'Höhenmeter'));
+  if (a.puls) kz.push(kennzahl(a.puls + (d.pulsMax ? ' / ' + d.pulsMax : ''), d.pulsMax ? 'Puls Ø / max' : 'Ø Puls'));
+  if (d.kalorien) kz.push(kennzahl(zahlFormat0.format(d.kalorien) + ' kcal', 'Kalorien'));
+  if (a.minGesamt && a.min && a.minGesamt - a.min >= 1) kz.push(kennzahl(dauer(a.minGesamt), 'Gesamtzeit'));
+  if (d.vMaxMs && !lauf) kz.push(kennzahl(dezimal1.format(d.vMaxMs * 3.6) + ' km/h', 'Max. Geschwindigkeit'));
+  html += '<div class="kennzahlen">' + kz.join('') + '</div>';
+
+  if (zustand.detailLaedt) return html + '<p class="leise stand">Lade Details …</p>';
+  if (zustand.detailFehler) return html + `<p class="hinweis-fehler stand">${esc(zustand.detailFehler)}</p>`;
+  if (!Object.keys(d).length) {
+    return html + '<p class="leise stand">Für diese Aktivität gibt es keine weiteren Daten von Garmin.</p>';
+  }
+
+  // Pulszonen
+  if (d.zonenMin && d.zonenMin.some(z => z > 0)) {
+    const summe = d.zonenMin.reduce((s, z) => s + z, 0);
+    const max = Math.max(...d.zonenMin);
+    html += '<h2>Pulszonen</h2><section class="karte zonen">' + d.zonenMin.map((z, i) => `
+      <div class="zone">
+        <span class="zone-name">${ZONEN[i].name}<small>${ZONEN[i].text}</small></span>
+        <span class="zone-balken"><span style="width:${max ? (z / max * 100).toFixed(1) : 0}%; background: var(--zone${i + 1})"></span></span>
+        <span class="zone-wert">${dauer(z)}<small>${summe ? Math.round(z / summe * 100) : 0} %</small></span>
+      </div>`).join('') + '</section>';
+  }
+
+  // Training
+  const training = [];
+  if (typeof d.teAerob === 'number') training.push(zeile('Trainingseffekt aerob', dezimal1.format(d.teAerob) + ' · ' + teText(d.teAerob)));
+  if (typeof d.teAnaerob === 'number') training.push(zeile('Trainingseffekt anaerob', dezimal1.format(d.teAnaerob) + ' · ' + teText(d.teAnaerob)));
+  if (d.teLabel) training.push(zeile('Haupt-Nutzen', esc(teLabel(d.teLabel))));
+  if (typeof d.belastung === 'number') training.push(zeile('Trainingsbelastung', zahlFormat0.format(d.belastung)));
+  if (typeof d.imModerat === 'number' || typeof d.imIntensiv === 'number') {
+    const mod = d.imModerat || 0;
+    const int = d.imIntensiv || 0;
+    training.push(zeile('Intensitätsminuten', `<b>${mod + 2 * int}</b> <span class="leise">(${mod} moderat + 2 × ${int} intensiv)</span>`));
+  }
+  if (typeof d.bodyBattery === 'number') training.push(zeile('Body Battery', (d.bodyBattery > 0 ? '+' : '') + d.bodyBattery));
+  if (training.length) html += '<h2>Training</h2><section class="karte"><table class="tabelle">' + training.join('') + '</table></section>';
+
+  // Laufstil (nur Laufen)
+  const stil = [];
+  if (a.sportart === 'laufen') {
+    if (d.kadenzLauf) stil.push(zeile('Schrittfrequenz', d.kadenzLauf + ' Schritte/min'));
+    if (d.schrittlaengeCm) stil.push(zeile('Schrittlänge', dezimal2.format(d.schrittlaengeCm / 100) + ' m'));
+    if (d.bodenkontaktMs) stil.push(zeile('Bodenkontaktzeit', d.bodenkontaktMs + ' ms'));
+    if (d.vertOszCm) stil.push(zeile('Vertikale Bewegung', dezimal1.format(d.vertOszCm) + ' cm'));
+    if (d.vertVerhaeltnis) stil.push(zeile('Vertikales Verhältnis', dezimal1.format(d.vertVerhaeltnis) + ' %'));
+    if (d.vGapMs) stil.push(zeile('Pace steigungsbereinigt', pace(1000 / d.vGapMs)));
+    if (d.leistungW) stil.push(zeile('Ø Leistung', d.leistungW + ' W'));
+  } else if (a.sportart === 'rad') {
+    if (d.kadenzRad) stil.push(zeile('Trittfrequenz', d.kadenzRad + ' U/min'));
+    if (d.leistungW) stil.push(zeile('Ø Leistung', d.leistungW + ' W' + (d.leistungNormW ? ' (normiert ' + d.leistungNormW + ' W)' : '')));
+  }
+  if (typeof d.tempMin === 'number' && typeof d.tempMax === 'number') {
+    stil.push(zeile('Temperatur', d.tempMin === d.tempMax ? d.tempMin + ' °C' : d.tempMin + ' bis ' + d.tempMax + ' °C'));
+  }
+  if (d.schritte && a.sportart !== 'rad') stil.push(zeile('Schritte', zahlFormat0.format(d.schritte)));
+  if (stil.length) html += `<h2>${a.sportart === 'laufen' ? 'Laufstil' : 'Weitere Werte'}</h2><section class="karte"><table class="tabelle">${stil.join('')}</table></section>`;
+
+  // Bestzeiten in dieser Aktivität (Laufen)
+  if (a.sportart === 'laufen') {
+    const splits = [['1 km', d.split1kS, 1], ['5 km', d.split5kS, 5], ['10 km', d.split10kS, 10],
+      ['Halbmarathon', d.split21kS, 21.0975], ['Marathon', d.split42kS, 42.195]]
+      .filter(s => typeof s[1] === 'number' && s[1] > 0)
+      .map(s => zeile('Schnellste ' + s[0], zeitAusSekunden(s[1]) + ' <span class="leise">(' + pace(s[1] / s[2]) + ')</span>'));
+    if (splits.length) html += '<h2>Schnellste Abschnitte</h2><section class="karte"><table class="tabelle">' + splits.join('') + '</table></section>';
+  }
+  return html;
+}
+
+// ---------------------------------------------------------------------------
 // Zeichnen und Ereignisse
 // ---------------------------------------------------------------------------
 
 function zeichnen() {
   const inhalt = document.getElementById('inhalt');
-  inhalt.innerHTML = zustand.ansicht === 'einstellungen' ? ansichtEinstellungen() : ansichtWoche();
+  inhalt.innerHTML = zustand.ansicht === 'einstellungen' ? ansichtEinstellungen()
+    : zustand.ansicht === 'detail' ? ansichtDetail() : ansichtWoche();
   document.querySelectorAll('.leiste-knopf').forEach(k => {
-    const aktiv = k.dataset.ansicht === zustand.ansicht;
+    const aktiv = k.dataset.ansicht === zustand.ansicht || (k.dataset.ansicht === 'woche' && zustand.ansicht === 'detail');
     k.classList.toggle('aktiv', aktiv);
     if (aktiv) k.setAttribute('aria-current', 'page');
     else k.removeAttribute('aria-current');
@@ -605,6 +801,8 @@ document.addEventListener('click', ereignis => {
     return;
   }
   switch (ziel.dataset.aktion) {
+    case 'detail': detailOeffnen(ziel.dataset.id); break;
+    case 'zurueck': history.back(); break;
     case 'woche-zurueck': zustand.wocheVersatz--; zeichnen(); break;
     case 'woche-vor': zustand.wocheVersatz = Math.min(0, zustand.wocheVersatz + 1); zeichnen(); break;
     case 'zu-einstellungen': zustand.ansicht = 'einstellungen'; zeichnen(); break;
@@ -635,6 +833,15 @@ document.addEventListener('submit', async ereignis => {
   } else {
     meldung('Verbunden, ' + zustand.aktivitaeten.length + ' Aktivitäten geladen.');
     zustand.ansicht = 'woche';
+    zeichnen();
+  }
+});
+
+// Zurück-Taste (Handy) bzw. Knopf „Zurück“ schließt die Detailansicht
+window.addEventListener('popstate', () => {
+  if (zustand.ansicht === 'detail') {
+    zustand.ansicht = 'woche';
+    zustand.detailId = null;
     zeichnen();
   }
 });
