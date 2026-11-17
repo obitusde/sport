@@ -1,18 +1,23 @@
 /**
  * Sammler.gs – v0.2: Aktivitäten von Garmin ins Sheet „Aktivitaeten" übernehmen
- * Version: 0.2.0 (2026-11-17)
+ * Version: 0.2.1 (2026-11-17)
  *
  * Funktionen zum Ausführen im Script-Editor:
  * - sammelnTrockenlauf()  Diagnose: holt die Daten, schreibt nichts, loggt nur Zählungen
  * - sammeln()             holt neue Aktivitäten und schreibt sie ins Sheet
  * - zeitgeberEinrichten() richtet den täglichen Lauf um ca. 03:00 Europe/Zurich ein
  * - statusZeigen()        loggt letzten Import, letzten Fehler, Sheet-Link und Zeitgeber
+ * - sportartenNeuBerechnen() setzt die Sportart aller Zeilen neu aus dem Garmin-Typ
  *
  * Ablauf von sammeln():
  * - Beim ersten Lauf (Sheet leer) wird die ganze Historie geholt.
  * - Danach jeweils die letzten NACHLAUF_TAGE Tage, damit spät synchronisierte
  *   Aktivitäten nicht verloren gehen. Doppelte werden über activityId erkannt.
+ * - Danach wird die Sportart aller Zeilen aus garminTyp neu berechnet. So wirken
+ *   Änderungen an SPORTARTEN auch für bereits importierte Aktivitäten.
  * - Fehler landen in der Script Property LETZTER_FEHLER und lösen eine Mail aus.
+ *
+ * Änderungen 0.2.1: neue Sportart „schwimmen“, Sportart wird bei jedem Lauf nachberechnet.
  *
  * Das Sheet „Sport-Daten" legt das Skript beim ersten Lauf selbst an und merkt sich
  * die ID in der Script Property SHEET_ID. Ein bestehendes Sheet kann genutzt werden,
@@ -41,7 +46,8 @@ const SPORTARTEN = {
     'e_bike_fitness', 'e_bike_mountain'],
   wandern: ['hiking', 'walking', 'casual_walking', 'speed_walking', 'snow_shoe_ws'],
   ski: ['resort_skiing', 'resort_skiing_snowboarding_ws', 'backcountry_skiing',
-    'cross_country_skiing_ws', 'skate_skiing_ws']
+    'cross_country_skiing_ws', 'skate_skiing_ws'],
+  schwimmen: ['open_water_swimming', 'lap_swimming']
 };
 
 /** Garmin-Typen, die gar nicht ins Sheet kommen (overland = Autofahrten). */
@@ -77,6 +83,16 @@ function zeitgeberEinrichten() {
     .create();
   log_('Zeitgeber eingerichtet: sammeln() täglich zwischen ' + ZEITGEBER_STUNDE + ' und ' +
     (ZEITGEBER_STUNDE + 1) + ' Uhr (' + ZEITZONE + ').');
+}
+
+/** Setzt die Sportart aller Zeilen neu aus dem Garmin-Typ (z. B. nach Änderung von SPORTARTEN). */
+function sportartenNeuBerechnen() {
+  const b = blattOhneAnlegen_();
+  if (!b) {
+    log_('Kein Sheet vorhanden.');
+    return;
+  }
+  sportartenAktualisieren_(b, false);
 }
 
 /** Loggt den aktuellen Stand. */
@@ -118,7 +134,7 @@ function sammelnIntern_(trocken) {
   const t0 = Date.now();
 
   try {
-    log_('===== Sammler v0.2.0 ' + (trocken ? 'TROCKENLAUF (schreibt nichts)' : 'gestartet') + ' =====');
+    log_('===== Sammler v0.2.1 ' + (trocken ? 'TROCKENLAUF (schreibt nichts)' : 'gestartet') + ' =====');
     const blatt = trocken ? blattOhneAnlegen_() : blatt_();
     const bekannt = bekannteIds_(blatt);
     const voll = bekannt.size === 0;
@@ -163,9 +179,11 @@ function sammelnIntern_(trocken) {
     }
 
     if (trocken) {
+      if (blatt) sportartenAktualisieren_(blatt, true);
       log_('Trockenlauf: nichts geschrieben.');
     } else {
       if (neu.length) schreiben_(blatt, neu);
+      sportartenAktualisieren_(blatt, false);
       props.setProperties({
         LETZTER_IMPORT: Utilities.formatDate(jetzt, ZEITZONE, 'yyyy-MM-dd HH:mm:ss'),
         LETZTER_IMPORT_NEU: String(neu.length),
@@ -270,6 +288,35 @@ function bekannteIds_(b) {
     if (z[0] !== '') ids.add(String(z[0]));
   });
   return ids;
+}
+
+/**
+ * Berechnet die Sportart aller Zeilen aus garminTyp neu und schreibt Änderungen zurück.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} b
+ * @param {boolean} trocken nur zählen, nichts schreiben
+ */
+function sportartenAktualisieren_(b, trocken) {
+  const n = b.getLastRow() - 1;
+  if (n < 1) return;
+  const spalteSportart = SPALTEN.indexOf('sportart') + 1;
+  const spalteTyp = SPALTEN.indexOf('garminTyp') + 1;
+  const sportarten = b.getRange(2, spalteSportart, n, 1).getValues();
+  const typen = b.getRange(2, spalteTyp, n, 1).getValues();
+  const geaendert = {};
+  let anzahl = 0;
+  const neu = sportarten.map(function (z, i) {
+    const soll = sportart_(String(typen[i][0]));
+    if (z[0] !== soll) {
+      anzahl++;
+      const schluessel = z[0] + '→' + soll;
+      geaendert[schluessel] = (geaendert[schluessel] || 0) + 1;
+    }
+    return [soll];
+  });
+  if (!anzahl) return;
+  log_('Sportart ' + (trocken ? 'würde sich ändern' : 'geändert') + ' bei ' + anzahl + ' Zeilen: ' +
+    Object.keys(geaendert).map(function (k) { return k + '=' + geaendert[k]; }).join(', '));
+  if (!trocken) b.getRange(2, spalteSportart, n, 1).setValues(neu);
 }
 
 /** Hängt Zeilen an, setzt Formate und sortiert nach Startzeit. */

@@ -1,6 +1,6 @@
 # PROJEKT.md – Sport-Tracker (Arbeitstitel „sport")
 
-Version: 0.2.0 (2026-11-17) – v0.2 Sammler bereit, FIT-Diagnose offen
+Version: 0.2.1 (2026-11-17) – v0.2 läuft, v0.3 in Planung
 
 Dieses Dokument ist die Grundlage für die Entwicklung mit Claude Code. Es beschreibt Ziele, Architektur, Arbeitsweise und Fahrplan. Claude Code liest es vor jeder Arbeit und hält es aktuell.
 
@@ -91,7 +91,15 @@ Epix / Tacho → Garmin Connect (unverändert)
 - `metadataDTO` enthält nur `manufacturer`, kein Gerätemodell.
 - Historie vollständig über die Liste: 2740 Aktivitäten von 2012 bis heute, 28 Seiten à 99 in ca. 21 s.
 - Keine Ratenlimit-Kopfzeilen, kein Fehler bei 28 Abrufen am Stück (mit 300 ms Pause).
-- Download der Originaldatei mit `Accept: application/json` → HTTP 406. Diagnose 0.1.1 probiert andere Accept-Köpfe. **Offen:** ob GPS in der FIT steckt und ob Apps Script sie schnell genug auswertet.
+- Download der Originaldatei mit `Accept: application/json` → HTTP 406, mit `Accept: */*` → HTTP 200.
+
+**Ergebnis der Diagnose v0.1.1 (2026-11-17):**
+
+- `metadataDTO.fileFormat` = `{"formatId":7,"formatKey":"fit"}`.
+- Download: ZIP (`application/x-zip-compressed`, Beispiel 64 KB) mit einer `.fit`-Datei (151 KB). `Utilities.unzip` funktioniert.
+- FIT-Scan in Apps Script in 19 ms: 1856 `record`-Nachrichten, davon 1849 mit GPS-Position.
+- Feld 2 `altitude` ist leer. Die Epix schreibt die Höhe vermutlich in `enhanced_altitude` (Feld 78), das wird beim Spur-Bau geprüft.
+- Viele Nachrichtentypen ohne Bedeutung für uns (z. B. 160, 233), der Scanner überspringt sie korrekt.
 - Bedingungen: Christof liest beim Erzeugen des Schlüssels die Nutzungsbedingungen. Keine Garmin-Daten an ein Sprachmodell (OpenRouter o. Ä.) schicken, bevor geklärt ist, dass das erlaubt ist.
 
 ### Entscheidungen
@@ -99,7 +107,9 @@ Epix / Tacho → Garmin Connect (unverändert)
 - **Abruf 1x täglich** reicht.
 - **Volle GPS-Spuren werden gespeichert**, ohne Abschneiden um den Wohnort, weil sie privat in Drive liegen. Kürzen rund ums Zuhause nur bei Funktionen zum Teilen.
 - **Keine Aktivitäts- oder GPS-Daten im Repo.** Das Repo und GitHub Pages sind öffentlich.
-- **FIT-Auswertung:** Die GPS-Spur steckt nur in der FIT-Datei (laut Swagger). Bevorzugt in Apps Script, weil die Daten dann Google nicht verlassen. Die v0.1-Diagnose enthält dafür einen minimalen FIT-Scanner und misst die Laufzeit. Erst wenn das nicht reicht, kommt eine GitHub Action (Python, z. B. `fitdecode`) in Frage.
+- **FIT-Auswertung in Apps Script** (entschieden nach Diagnose 0.1.1): Die GPS-Spur steckt nur in der FIT-Datei. Der eigene FIT-Scanner liest sie in Millisekunden. Keine GitHub Action nötig, die Daten verlassen Google nicht.
+- **Woche beginnt am Montag.**
+- **Wochenziel Läufe** wird in der App unter Einstellungen festgelegt, Standard 2 pro Woche.
 - **Deployment per GitHub Action schon ab v0.1** (statt erst v0.2). Die Skript-ID steht als Repo-Variable `GAS_SCRIPT_ID`, die Action erzeugt daraus `gas/.clasp.json`. clasp-Version fest: `@google/clasp@3.4.1`.
 - **Diagnose-Protokolle ohne Werte:** Die Diagnose loggt standardmäßig nur Struktur und Zählungen (`WERTE_LOGGEN = false`), damit das Protokoll keine Aktivitätsdaten enthält.
 - **Historie:** Die API reicht bis 2012 zurück. Ein Import aus dem Garmin-Datenexport ist nicht nötig. Der erste Lauf des Sammlers holt die ganze Historie.
@@ -136,7 +146,7 @@ Regeln:
 |---|---|
 | activityId | Garmin-ID, eindeutig, verhindert Doppelte |
 | start | Startzeit lokal (Europe/Zurich) |
-| sportart | `laufen`, `rad`, `wandern`, `ski`, `andere` |
+| sportart | `laufen`, `rad`, `wandern`, `ski`, `schwimmen`, `andere` |
 | garminTyp | Original-Typ von Garmin (`activityType.typeKey`) |
 | name | Name der Aktivität in Garmin |
 | distanz_km | Distanz (Garmin: `distance` in m) |
@@ -157,15 +167,16 @@ Regeln:
 | rad | `cycling`, `road_biking`, `gravel_cycling`, `mountain_biking`, `indoor_cycling`, `e_bike_fitness`, `e_bike_mountain` |
 | wandern | `hiking`, `walking`, `casual_walking`, `speed_walking`, `snow_shoe_ws` |
 | ski | `resort_skiing`, `resort_skiing_snowboarding_ws`, `backcountry_skiing`, `cross_country_skiing_ws`, `skate_skiing_ws` |
-| andere | alle übrigen, z. B. `open_water_swimming` |
+| schwimmen | `open_water_swimming`, `lap_swimming` |
+| andere | alle übrigen |
 | nicht importiert | `overland` (Autofahrten), `incident_detected` |
 
-Laufband-Läufe zählen fürs Laufziel. Indoor-Fahrten zählen zu Rad, haben aber keine Spur. Steht in `Sammler.gs` (`SPORTARTEN`, `AUSGESCHLOSSEN`).
+Laufband-Läufe zählen fürs Laufziel. Indoor-Fahrten zählen zu Rad, haben aber keine Spur. Steht in `Sammler.gs` (`SPORTARTEN`, `AUSGESCHLOSSEN`). Der Sammler berechnet bei jedem Lauf die Sportart aller Zeilen aus `garminTyp` neu, Änderungen an der Zuordnung wirken also auch rückwirkend (nicht für ausgeschlossene Typen, die gar nicht im Sheet stehen).
 
 ### Sheet „Konfiguration"
 
-- Wochenziel Läufe (offen: 1 oder 2)
-- Wochenbeginn (offen: Montag angenommen)
+- Wochenziel Läufe (Standard 2, einstellbar in der App)
+- Wochenbeginn: Montag
 - Weitere Einstellungen nach Bedarf
 
 ### Drive-Ordner „Sport-Spuren"
@@ -288,8 +299,6 @@ Später:
 
 ## 10. Offene Fragen
 
-- Wochenziel: mindestens 1 Lauf oder 2 Läufe?
-- Wochenbeginn: Montag?
 - Repo-Name: `sport` oder anders?
 - Was sagen Garmins Nutzungsbedingungen zur Weitergabe an KI-Dienste? Davon hängt auch ab, ob Diagnose-Protokolle mit Werten (`WERTE_LOGGEN = true`) mit Claude geteilt werden dürfen.
 
@@ -300,5 +309,6 @@ Später:
 | Version | Datum | Änderung |
 |---|---|---|
 | 0.1 | 2026-11-16 | Erste Projektbeschreibung aus der Planung im Chat |
+| 0.2.1 | 2026-11-17 | FIT-Ergebnis eingetragen, FIT-Auswertung bleibt in Apps Script. Sportart `schwimmen` neu, `gas/Sammler.gs` 0.2.1 berechnet die Sportart bei jedem Lauf neu. Woche ab Montag, Wochenziel Standard 2, einstellbar in der App. Erster Import: 2736 Aktivitäten |
 | 0.2.0 | 2026-11-17 | Diagnose-Ergebnisse eingetragen. Zuordnung Garmin-Typ → Sportart mit `ski`, `overland` ausgeschlossen. Sheet-Spalten `name` und `hat_gps` ergänzt. Neu: `gas/Sammler.gs` 0.2.0, `gas/Garmin.gs` 0.2.0, `gas/Hilfen.gs` 0.2.0. `gas/Diagnose.gs` 0.1.1 (FIT-Download mit anderem Accept-Kopf). `appsscript.json` mit Berechtigungen für Sheets, Mail, Zeitgeber. v0.6 angepasst, Historie kommt über die API |
 | 0.1.1 | 2026-11-17 | Swagger-Doku ausgewertet (Endpunkte, Felder, keine GPS-Spur außer FIT). Neu: `gas/Diagnose.gs` 0.1.0, `gas/appsscript.json`, `.github/workflows/deploy-gas.yml` 0.1.0, `CLAUDE.md` 0.1.0, `.gitignore`. Deployment per Action schon ab v0.1, Einrichtungsschritte präzisiert |
