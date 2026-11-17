@@ -1,16 +1,21 @@
 /**
  * app.js – Sport-App
- * Version: 0.3.0 (2026-11-17)
+ * Version: 0.3.1 (2026-11-17)
  *
  * Ansichten: Woche, Einstellungen.
  * Die App holt die Aktivitäten als Liste von der Apps-Script-Web-App und rechnet
  * Woche, Laufziel und Serie selbst. Die letzten Daten liegen im localStorage,
  * damit die App sofort und auch offline etwas zeigt.
  * Web-App-URL und Token werden nur im localStorage dieses Geräts gespeichert.
+ *
+ * Änderungen 0.3.1: Knopf „Von Garmin holen“ (Wochenansicht oben und Einstellungen):
+ * startet den Sammler über die Web-App, lädt danach neu und meldet die Anzahl neuer
+ * Aktivitäten. Ersetzt „Jetzt neu laden“. Distanz immer mit einer Nachkommastelle,
+ * abgerundet (4,96 km → „4,9 km“).
  */
 'use strict';
 
-const APP_VERSION = '0.3.0';
+const APP_VERSION = '0.3.1';
 
 const SPEICHER = {
   url: 'sport.url',
@@ -35,7 +40,8 @@ const TAGE_KURZ = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 const MONATE = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August',
   'September', 'Oktober', 'November', 'Dezember'];
 
-const zahlFormat1 = new Intl.NumberFormat('de-CH', { maximumFractionDigits: 1 });
+// Distanz immer mit einer Nachkommastelle und Komma, z. B. „4,9 km“
+const kmFormat = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const zahlFormat0 = new Intl.NumberFormat('de-CH', { maximumFractionDigits: 0 });
 
 const zustand = {
@@ -46,7 +52,7 @@ const zustand = {
   einstellungen: { wochenzielLaeufe: 2 },
   status: null,
   webAppVersion: null,
-  laedt: false,
+  laedt: false, // false, 'garmin' (Sammler läuft) oder 'daten' (Liste wird geladen)
   fehler: null
 };
 
@@ -131,7 +137,7 @@ async function allesLaden() {
   if (zustand.laedt) return;
   const v = verbindung();
   if (!v.url || !v.token) return;
-  zustand.laedt = true;
+  zustand.laedt = 'daten';
   zustand.fehler = null;
   zeichnen();
   try {
@@ -153,6 +159,32 @@ async function allesLaden() {
   } finally {
     zustand.laedt = false;
     zeichnen();
+  }
+}
+
+/** Startet den Sammler (Garmin → Sheet), lädt danach neu und meldet das Ergebnis. */
+async function vonGarminHolen() {
+  if (zustand.laedt) return;
+  zustand.laedt = 'garmin';
+  zustand.fehler = null;
+  zeichnen();
+  let neu;
+  try {
+    neu = (await api('sammeln')).neu;
+  } catch (e) {
+    zustand.laedt = false;
+    zustand.fehler = e.message;
+    zeichnen();
+    meldung('Fehler: ' + e.message);
+    return;
+  }
+  zustand.laedt = false;
+  await allesLaden();
+  if (zustand.fehler) {
+    meldung('Fehler: ' + zustand.fehler);
+  } else {
+    meldung(neu === 0 ? 'Keine neuen Aktivitäten bei Garmin.'
+      : neu === 1 ? '1 neue Aktivität geholt.' : neu + ' neue Aktivitäten geholt.');
   }
 }
 
@@ -273,8 +305,9 @@ function esc(text) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+/** Abgerundet auf 0,1 km: 4,96 km wird „4,9 km“, damit „5,0 km“ nur bei vollen 5 km erscheint. */
 function km(wert) {
-  return zahlFormat1.format(wert) + ' km';
+  return kmFormat.format(Math.floor(wert * 10 + 1e-6) / 10) + ' km';
 }
 
 function dauer(min) {
@@ -340,6 +373,7 @@ function ansichtWoche() {
     <button class="rund" data-aktion="woche-vor" aria-label="Nächste Woche" ${zustand.wocheVersatz >= 0 ? 'disabled' : ''}>${PFEIL_RECHTS}</button>
   </header>`;
 
+  html += aktualisierenZeile();
   html += zielKarte(w);
   html += tagesKarte(w);
 
@@ -440,14 +474,33 @@ function tagesKarte(w) {
   </section>`;
 }
 
+const SYMBOL_AKTUALISIEREN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>';
+
+function ladeText() {
+  return zustand.laedt === 'garmin' ? 'Hole neue Aktivitäten von Garmin …' : 'Lade Daten …';
+}
+
+/** „2026-11-17 03:12:00“ → „17.11. 03:12“ */
+function kurzZeit(text) {
+  const m = /^\d{4}-(\d{2})-(\d{2}) (\d{2}:\d{2})/.exec(String(text || ''));
+  return m ? (+m[2]) + '.' + (+m[1]) + '. ' + m[3] : '–';
+}
+
+/** Zeile oben in der Wochenansicht: Stand der Daten und Knopf „Von Garmin holen“. */
+function aktualisierenZeile() {
+  const text = zustand.laedt ? ladeText()
+    : zustand.fehler ? '<span class="hinweis-fehler">' + esc(zustand.fehler) + '</span>'
+      : 'Import ' + esc(kurzZeit(zustand.status && zustand.status.letzterImport));
+  return `<div class="aktualisieren">
+    <span class="leise">${text}</span>
+    <button class="knopf klein" data-aktion="von-garmin" ${zustand.laedt ? 'disabled' : ''}>
+      <span class="${zustand.laedt ? 'dreht' : ''}">${SYMBOL_AKTUALISIEREN}</span> Von Garmin holen</button>
+  </div>`;
+}
+
 function standZeile() {
-  if (zustand.laedt) return '<p class="leise stand">Aktualisiere …</p>';
-  let html = '<p class="leise stand">';
-  if (zustand.fehler) html += '<span class="hinweis-fehler">' + esc(zustand.fehler) + '</span><br>';
-  html += 'Daten geladen: ' + zeitpunkt(zustand.datenStand);
-  if (zustand.status && zustand.status.letzterImport) html += '<br>Letzter Garmin-Import: ' + esc(zustand.status.letzterImport);
-  html += '</p>';
-  return html;
+  if (zustand.laedt) return '<p class="leise stand">' + ladeText() + '</p>';
+  return '<p class="leise stand">Daten auf diesem Gerät: ' + zeitpunkt(zustand.datenStand) + '</p>';
 }
 
 function ansichtEinstellungen() {
@@ -493,7 +546,7 @@ function ansichtEinstellungen() {
       <tr><td>Version App / Web-App</td><td>${APP_VERSION} / ${esc(zustand.webAppVersion || '–')}</td></tr>
     </table>
     <div class="knopfreihe" style="margin-top:12px">
-      <button class="knopf" data-aktion="neu-laden" ${zustand.laedt || !v.token ? 'disabled' : ''}>${zustand.laedt ? 'Lädt …' : 'Jetzt neu laden'}</button>
+      <button class="knopf" data-aktion="von-garmin" ${zustand.laedt || !v.token ? 'disabled' : ''}>${zustand.laedt ? ladeText() : 'Von Garmin holen'}</button>
     </div>
     ${zustand.fehler ? `<p class="hinweis-fehler">${esc(zustand.fehler)}</p>` : ''}
   </section>`;
@@ -557,7 +610,7 @@ document.addEventListener('click', ereignis => {
     case 'zu-einstellungen': zustand.ansicht = 'einstellungen'; zeichnen(); break;
     case 'ziel-minus': zielAendern(-1); break;
     case 'ziel-plus': zielAendern(1); break;
-    case 'neu-laden': allesLaden(); break;
+    case 'von-garmin': vonGarminHolen(); break;
     case 'verbindung-loeschen':
       if (confirm('Verbindung und gespeicherte Daten auf diesem Gerät löschen?')) {
         Object.values(SPEICHER).forEach(k => schreiben(k, null));

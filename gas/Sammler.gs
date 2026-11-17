@@ -1,6 +1,6 @@
 /**
  * Sammler.gs – v0.2: Aktivitäten von Garmin ins Sheet „Aktivitaeten" übernehmen
- * Version: 0.2.1 (2026-11-17)
+ * Version: 0.2.2 (2026-11-17)
  *
  * Funktionen zum Ausführen im Script-Editor:
  * - sammelnTrockenlauf()  Diagnose: holt die Daten, schreibt nichts, loggt nur Zählungen
@@ -18,6 +18,8 @@
  * - Fehler landen in der Script Property LETZTER_FEHLER und lösen eine Mail aus.
  *
  * Änderungen 0.2.1: neue Sportart „schwimmen“, Sportart wird bei jedem Lauf nachberechnet.
+ * Änderungen 0.2.2: sammelnIntern_ liefert ein Ergebnis zurück und kann ohne Fehler-Mail
+ *   laufen. Die Web-App nutzt das für den Knopf „Von Garmin holen“ in der App.
  *
  * Das Sheet „Sport-Daten" legt das Skript beim ersten Lauf selbst an und merkt sich
  * die ID in der Script Property SHEET_ID. Ein bestehendes Sheet kann genutzt werden,
@@ -122,19 +124,24 @@ function statusZeigen() {
 
 /**
  * @param {boolean} trocken true = nichts schreiben, nur loggen
+ * @param {{mail: (boolean|undefined)}=} optionen mail: false = keine Fehler-Mail (Standard: Mail)
+ * @return {{neu: number, proSportart: Object, ausgeschlossen: number, fehler: (string|null)}}
  */
-function sammelnIntern_(trocken) {
+function sammelnIntern_(trocken, optionen) {
+  optionen = optionen || {};
+  const ergebnis = { neu: 0, proSportart: {}, ausgeschlossen: 0, fehler: null };
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(30000)) {
     log_('Ein anderer Lauf ist noch aktiv. Abbruch.');
-    return;
+    ergebnis.fehler = 'Ein anderer Abruf läuft gerade. Bitte gleich nochmal versuchen.';
+    return ergebnis;
   }
   const props = PropertiesService.getScriptProperties();
   const jetzt = new Date();
   const t0 = Date.now();
 
   try {
-    log_('===== Sammler v0.2.1 ' + (trocken ? 'TROCKENLAUF (schreibt nichts)' : 'gestartet') + ' =====');
+    log_('===== Sammler v0.2.2 ' + (trocken ? 'TROCKENLAUF (schreibt nichts)' : 'gestartet') + ' =====');
     const blatt = trocken ? blattOhneAnlegen_() : blatt_();
     const bekannt = bekannteIds_(blatt);
     const voll = bekannt.size === 0;
@@ -190,17 +197,22 @@ function sammelnIntern_(trocken) {
         LETZTER_FEHLER: ''
       });
     }
+    ergebnis.neu = neu.length;
+    ergebnis.proSportart = proSportart;
+    ergebnis.ausgeschlossen = ausgeschlossen;
     log_('===== Fertig in ' + Math.round((Date.now() - t0) / 1000) + ' s =====');
   } catch (e) {
     log_('FEHLER: ' + e.message);
+    ergebnis.fehler = e.message;
     if (!trocken) {
       props.setProperty('LETZTER_FEHLER', Utilities.formatDate(jetzt, ZEITZONE, 'yyyy-MM-dd HH:mm:ss') +
         ' ' + e.message);
-      fehlerMail_(e);
+      if (optionen.mail !== false) fehlerMail_(e);
     }
   } finally {
     lock.releaseLock();
   }
+  return ergebnis;
 }
 
 /** Ordnet einem Garmin-Typ die Sportart zu. */

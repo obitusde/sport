@@ -1,4 +1,4 @@
-/* style.css – Sport-App, Version 0.3.0 (2026-11-17) */
+/* style.css – Sport-App, Version 0.3.1 (2026-11-17) */
 
 :root {
   --hintergrund: #f6f5f2;
@@ -123,6 +123,18 @@ button { font: inherit; color: inherit; }
 }
 .rund:disabled { opacity: 0.35; cursor: default; }
 .rund svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Zeile „Von Garmin holen“ */
+.aktualisieren {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-bottom: 12px;
+}
+.aktualisieren .leise { min-width: 0; }
+.knopf.klein { padding: 7px 12px; font-size: 0.875rem; flex: none; }
+.knopf svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; display: block; }
+.dreht { display: inline-block; animation: drehen 1s linear infinite; }
+@keyframes drehen { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .dreht { animation: none; } }
 
 /* Laufziel */
 .ziel-zeile { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }

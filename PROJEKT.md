@@ -1,6 +1,6 @@
 # PROJEKT.md – Sport-Tracker (Arbeitstitel „sport")
 
-Version: 0.3.0 (2026-11-17) – v0.3 Web-App und App gebaut, Einrichtung offen
+Version: 0.3.1 (2026-11-17) – v0.3 in Betrieb
 
 Dieses Dokument ist die Grundlage für die Entwicklung mit Claude Code. Es beschreibt Ziele, Architektur, Arbeitsweise und Fahrplan. Claude Code liest es vor jeder Arbeit und hält es aktuell.
 
@@ -112,6 +112,8 @@ Epix / Tacho → Garmin Connect (unverändert)
 - **Wochenziel Läufe** wird in der App unter Einstellungen festgelegt, Standard 2 pro Woche. Gespeichert im Sheet „Konfiguration“, damit es auf allen Geräten gilt.
 - **Die App rechnet** (entschieden 2026-11-17): Die Web-App liefert die ganze Aktivitätsliste kompakt (ca. 2700 Zeilen). Woche, Laufziel, Serie und später der Verlauf werden in der App berechnet. Die App speichert die letzten Daten im localStorage und zeigt sie sofort und offline.
 - **Wochen-Serie:** Wochen in Folge mit erreichtem Laufziel. Die laufende Woche zählt mit, sobald das Ziel erreicht ist, und bricht die Serie nicht, solange sie offen ist. Rückwirkend gilt das aktuelle Wochenziel.
+- **Aktualisieren:** Nachts automatisch (3–4 Uhr), tagsüber nur von Hand über den Knopf „Von Garmin holen“ in der App. Kein stündlicher Abruf.
+- **Distanz in der App:** immer eine Nachkommastelle mit Komma, abgerundet (4,96 km → „4,9 km“).
 - **App ohne Build-Schritt:** schlichtes HTML/CSS/JavaScript in `/docs`, GitHub Pages veröffentlicht direkt.
 - **Deployment per GitHub Action schon ab v0.1** (statt erst v0.2). Die Skript-ID steht als Repo-Variable `GAS_SCRIPT_ID`, die Action erzeugt daraus `gas/.clasp.json`. clasp-Version fest: `@google/clasp@3.4.1`.
 - **Diagnose-Protokolle ohne Werte:** Die Diagnose loggt standardmäßig nur Struktur und Zählungen (`WERTE_LOGGEN = false`), damit das Protokoll keine Aktivitätsdaten enthält.
@@ -199,6 +201,7 @@ Laufband-Läufe zählen fürs Laufziel. Indoor-Fahrten zählen zu Rad, haben abe
 | `einstellungen` | `einstellungen` aus dem Blatt „Konfiguration“, fehlende werden mit Standardwert angelegt |
 | `einstellungSetzen` | ändert `schluessel` auf `wert` (nur bekannte Schlüssel, geprüft), liefert alle Einstellungen |
 | `status` | `letzterImport`, `letzterImportNeu`, `letzterFehler`, `anzahlAktivitaeten` |
+| `sammeln` | startet den Sammler sofort (ohne Fehler-Mail), liefert `neu` und `proSportart`. Für den Knopf „Von Garmin holen“ |
 | `spuren`, `spur` | ab v0.5 |
 
 Antwort immer JSON: `{ok: true, version, …}` oder `{ok: false, fehler}`. Ohne gültiges Token: `{ok: false, fehler: "nicht berechtigt"}`.
@@ -326,6 +329,7 @@ Für v0.3:
 | Version | Datum | Änderung |
 |---|---|---|
 | 0.1 | 2026-11-16 | Erste Projektbeschreibung aus der Planung im Chat |
+| 0.3.1 | 2026-11-17 | Knopf „Von Garmin holen“ in der App (Wochenansicht und Einstellungen), Rückmeldung mit Anzahl neuer Aktivitäten. `gas/WebApp.gs` 0.3.1 (Aktion `sammeln`), `gas/Sammler.gs` 0.2.2 (liefert Ergebnis, Fehler-Mail abschaltbar), App 0.3.1 (`app.js`, `style.css`, `sw.js`). Distanz abgerundet mit einer Nachkommastelle |
 | 0.3.0 | 2026-11-17 | v0.3: `gas/WebApp.gs` 0.3.0 (doGet mit Token, Aktionen aktivitaeten, einstellungen, einstellungSetzen, status, Diagnose `webAppTesten`), `appsscript.json` mit Web-App-Einstellungen. App in `/docs` 0.3.0: Wochenansicht (Laufziel, was noch fehlt, Serie, Tage, Sport je Sportart, Aktivitäten, frühere Wochen), Einstellungen (Wochenziel, Verbindung, Datenstand), offline-fähig. Entscheidungen: App rechnet, Einstellungen im Sheet. Abschnitt 5 festgelegt |
 | 0.2.1 | 2026-11-17 | FIT-Ergebnis eingetragen, FIT-Auswertung bleibt in Apps Script. Sportart `schwimmen` neu, `gas/Sammler.gs` 0.2.1 berechnet die Sportart bei jedem Lauf neu. Woche ab Montag, Wochenziel Standard 2, einstellbar in der App. Erster Import: 2736 Aktivitäten |
 | 0.2.0 | 2026-11-17 | Diagnose-Ergebnisse eingetragen. Zuordnung Garmin-Typ → Sportart mit `ski`, `overland` ausgeschlossen. Sheet-Spalten `name` und `hat_gps` ergänzt. Neu: `gas/Sammler.gs` 0.2.0, `gas/Garmin.gs` 0.2.0, `gas/Hilfen.gs` 0.2.0. `gas/Diagnose.gs` 0.1.1 (FIT-Download mit anderem Accept-Kopf). `appsscript.json` mit Berechtigungen für Sheets, Mail, Zeitgeber. v0.6 angepasst, Historie kommt über die API |

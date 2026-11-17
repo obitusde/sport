@@ -1,6 +1,6 @@
 /**
  * WebApp.gs – v0.3: Schnittstelle für die App (JSON)
- * Version: 0.3.0 (2026-11-17)
+ * Version: 0.3.1 (2026-11-17)
  *
  * Aufruf: GET <webapp-url>?token=<WEBAPP_TOKEN>&aktion=<aktion>&...
  *
@@ -10,15 +10,19 @@
  * | einstellungen     | Einstellungen aus dem Blatt „Konfiguration“                     |
  * | einstellungSetzen | ändert eine Einstellung (schluessel, wert), liefert alle neu    |
  * | status            | letzter Import, letzter Fehler, Anzahl Aktivitäten             |
+ * | sammeln           | holt neue Aktivitäten von Garmin ins Sheet: {neu, proSportart} |
  *
  * Jede Antwort ist JSON: {ok: true, version, …} oder {ok: false, fehler}.
  * Ohne gültiges Token liefert die Web-App keine Daten.
  *
  * Voraussetzung: Script Properties WEBAPP_TOKEN und SHEET_ID (legt sammeln() an).
  * Diagnose: webAppTesten() im Script-Editor ausführen, loggt nur Größen und Zählungen.
+ *
+ * Änderungen 0.3.1: Aktion „sammeln“ für den Knopf „Von Garmin holen“ (ohne Fehler-Mail,
+ * der Fehler geht direkt an die App).
  */
 
-const WEBAPP_VERSION = '0.3.0';
+const WEBAPP_VERSION = '0.3.1';
 const BLATT_KONFIGURATION = 'Konfiguration';
 
 /**
@@ -105,6 +109,11 @@ function aktionAusfuehren_(p) {
       return Object.assign(basis, { einstellungen: einstellungenLesen_() });
     case 'status':
       return Object.assign(basis, statusDaten_());
+    case 'sammeln': {
+      const e = sammelnIntern_(false, { mail: false });
+      if (e.fehler) throw new Error(e.fehler);
+      return Object.assign(basis, { neu: e.neu, proSportart: e.proSportart });
+    }
     default:
       throw new Error('unbekannte aktion: ' + p.aktion);
   }
