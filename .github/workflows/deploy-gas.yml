@@ -1,0 +1,77 @@
+# deploy-gas.yml – Apps Script deployen
+# Version: 0.1.0 (2026-11-17)
+#
+# Überträgt den Ordner /gas per clasp nach Apps Script.
+# Falls die Variable GAS_DEPLOYMENT_ID gesetzt ist, wird zusätzlich die bestehende
+# Web-App-Bereitstellung aktualisiert (gleiche URL). Ab v0.3 nötig, vorher nicht.
+#
+# Benötigt (Repo → Settings → Secrets and variables → Actions):
+#   Secret   CLASPRC_JSON       Inhalt von ~/.clasprc.json nach „clasp login"
+#   Variable GAS_SCRIPT_ID      Skript-ID des Apps-Script-Projekts
+#   Variable GAS_DEPLOYMENT_ID  (optional) Bereitstellungs-ID der Web-App
+
+name: Apps Script deployen
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'gas/**'
+      - '.github/workflows/deploy-gas.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-gas
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CLASP: '@google/clasp@3.4.1'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Repo auschecken
+        uses: actions/checkout@v4
+
+      - name: Node einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Voraussetzungen prüfen
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          GAS_SCRIPT_ID: ${{ vars.GAS_SCRIPT_ID }}
+        run: |
+          fehlt=0
+          if [ -z "$CLASPRC_JSON" ]; then echo "::error::Secret CLASPRC_JSON fehlt"; fehlt=1; fi
+          if [ -z "$GAS_SCRIPT_ID" ]; then echo "::error::Variable GAS_SCRIPT_ID fehlt"; fehlt=1; fi
+          exit $fehlt
+
+      - name: clasp-Zugang und Projektdatei schreiben
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          GAS_SCRIPT_ID: ${{ vars.GAS_SCRIPT_ID }}
+        run: |
+          umask 077
+          printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
+          printf '{"scriptId":"%s","rootDir":"."}\n' "$GAS_SCRIPT_ID" > gas/.clasp.json
+
+      - name: Dateien nach Apps Script übertragen
+        working-directory: gas
+        run: npx --yes "$CLASP" push --force
+
+      - name: Web-App-Bereitstellung aktualisieren
+        if: ${{ vars.GAS_DEPLOYMENT_ID != '' }}
+        working-directory: gas
+        env:
+          GAS_DEPLOYMENT_ID: ${{ vars.GAS_DEPLOYMENT_ID }}
+        run: npx --yes "$CLASP" update-deployment "$GAS_DEPLOYMENT_ID" --description "Commit ${GITHUB_SHA::7}"
+
+      - name: Zugang entfernen
+        if: always()
+        run: rm -f "$HOME/.clasprc.json"

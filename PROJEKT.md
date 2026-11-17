@@ -1,6 +1,6 @@
 # PROJEKT.md – Sport-Tracker (Arbeitstitel „sport")
 
-Version: 0.1 (2026-11-16) – Projektbeschreibung, noch kein Code
+Version: 0.1.1 (2026-11-17) – v0.1 Diagnose in Arbeit
 
 Dieses Dokument ist die Grundlage für die Entwicklung mit Claude Code. Es beschreibt Ziele, Architektur, Arbeitsweise und Fahrplan. Claude Code liest es vor jeder Arbeit und hält es aktuell.
 
@@ -65,10 +65,25 @@ Epix / Tacho → Garmin Connect (unverändert)
   POST https://personal.connectapi.garmin.com/personalapitoken-service/personal-api/personal-api-key/token
   Header: Authorization: ApiKey <api-key>
   ```
-- Zugriffstoken gilt 24 Stunden, kein Refresh-Token. Bei jedem Lauf neu holen.
+- Zugriffstoken gilt 24 Stunden (oder bis der Schlüssel abläuft), kein Refresh-Token. Bei jedem Lauf neu holen.
+- Schlüssel-Laufzeit wählbar: 30, 90, 180 Tage oder 1 Jahr. Garmin mailt etwa eine Woche vor Ablauf.
 - Nur Abfragen, keine Push-Benachrichtigung. Deshalb täglicher Zeitgeber.
-- Bekannt aus Berichten: Aktivitäten als JSON und als FIT-Datei. Garmin entfernt in API-Dateien möglicherweise berechnete Werte (VO2max, Erholungszeit). Für dieses Projekt unwichtig.
-- **Unbekannt, wird in v0.1 geklärt:** genaue Endpunkte und Felder, ob die GPS-Spur im JSON steckt oder nur in der FIT-Datei, wie weit die Historie zurückreicht, Ratenlimits, ob Abrufe aus Apps Script funktionieren.
+- Garmin entfernt in API-Dateien möglicherweise berechnete Werte (VO2max, Erholungszeit). Für dieses Projekt unwichtig.
+
+**Laut Swagger-Doku (OpenAPI 3.0.1, gelesen am 2026-11-17)**, Server `https://personal.connectapi.garmin.com`:
+
+| Endpunkt | Zweck |
+|---|---|
+| `GET /activitylist-service/activities/search/activities` | Liste (`SummarizedActivityDTO[]`). Parameter u. a. `startDate`, `endDate` (YYYY-MM-DD, lokale Startzeit, inklusiv), `start` (Versatz, Standard 0), `limit` (Standard 99), `sortOrder` (`asc`/`desc`), `activityType` (nur Eltern-Typ), `excludeChildren` (Standard true) |
+| `GET /activity-service/activity/{activityId}` | Details (`ActivitySummaryDTO`: `summaryDTO`, `metadataDTO`, `activityTypeDTO`, `splitSummaries` …) |
+| `GET /download-service/files/activity/{activityId}` | Originaldatei als ZIP (`application/x-zip-compressed`), also die FIT-Datei |
+
+- Die Liste enthält alle Felder fürs Sheet: `activityId`, `startTimeLocal`, `activityType.typeKey`, `distance` (m), `movingDuration`, `elapsedDuration`, `elevationGain`, `averageHR`, `manufacturer`, `hasPolyline`, `startLatitude/-Longitude`.
+- `activityType` hat `typeId`, `typeKey` (z. B. `running`) und `parentTypeId` (17 = selbst Eltern-Typ).
+- **Kein Endpunkt für die GPS-Spur.** Die volle Spur gibt es nur in der FIT-Datei.
+- Die Doku beschreibt weder die Token-Antwort noch Ratenlimits noch die Länge der Historie.
+
+**Wird in v0.1 per Diagnose geklärt:** Aufbau der Token-Antwort, Aufruf mit `Authorization: Bearer <token>`, ob Abrufe aus Apps Script funktionieren, ob Apps Script die ZIP entpacken und die FIT-Datei schnell genug auswerten kann, wie weit die Historie zurückreicht, Ratenlimit-Kopfzeilen, welche Garmin-Typen vorkommen.
 - Bedingungen: Christof liest beim Erzeugen des Schlüssels die Nutzungsbedingungen. Keine Garmin-Daten an ein Sprachmodell (OpenRouter o. Ä.) schicken, bevor geklärt ist, dass das erlaubt ist.
 
 ### Entscheidungen
@@ -76,7 +91,9 @@ Epix / Tacho → Garmin Connect (unverändert)
 - **Abruf 1x täglich** reicht.
 - **Volle GPS-Spuren werden gespeichert**, ohne Abschneiden um den Wohnort, weil sie privat in Drive liegen. Kürzen rund ums Zuhause nur bei Funktionen zum Teilen.
 - **Keine Aktivitäts- oder GPS-Daten im Repo.** Das Repo und GitHub Pages sind öffentlich.
-- **FIT-Auswertung:** Falls die GPS-Spur nur in der FIT-Datei steckt, wird in v0.1 entschieden, ob die FIT-Datei in Apps Script (JavaScript-FIT-Parser) oder in einer GitHub Action (Python, z. B. `fitdecode`) ausgewertet wird.
+- **FIT-Auswertung:** Die GPS-Spur steckt nur in der FIT-Datei (laut Swagger). Bevorzugt in Apps Script, weil die Daten dann Google nicht verlassen. Die v0.1-Diagnose enthält dafür einen minimalen FIT-Scanner und misst die Laufzeit. Erst wenn das nicht reicht, kommt eine GitHub Action (Python, z. B. `fitdecode`) in Frage.
+- **Deployment per GitHub Action schon ab v0.1** (statt erst v0.2). Die Skript-ID steht als Repo-Variable `GAS_SCRIPT_ID`, die Action erzeugt daraus `gas/.clasp.json`. clasp-Version fest: `@google/clasp@3.4.1`.
+- **Diagnose-Protokolle ohne Werte:** Die Diagnose loggt standardmäßig nur Struktur und Zählungen (`WERTE_LOGGEN = false`), damit das Protokoll keine Aktivitätsdaten enthält.
 - **Historie:** Falls die API nicht weit genug zurückreicht, einmaliger Import aus dem Garmin-Datenexport („Deine Daten exportieren", ZIP mit FIT-Dateien).
 
 ---
@@ -89,6 +106,8 @@ Epix / Tacho → Garmin Connect (unverändert)
 | Garmin Zugriffstoken | täglich vom Sammler geholt | 24 Stunden | nur zur Laufzeit / CacheService |
 | Web-App-Token | von Christof festgelegt | bis zur Änderung | Script Properties `WEBAPP_TOKEN`, einmalig in der PWA eingeben (localStorage) |
 | clasp-Zugang | einmalig eingerichtet | langfristig | GitHub-Secret `CLASPRC_JSON` |
+| Skript-ID | Apps-Script-Projekt | dauerhaft | GitHub-Variable `GAS_SCRIPT_ID` (kein Geheimnis) |
+| Web-App-Bereitstellung | erste Bereitstellung (ab v0.3) | dauerhaft | GitHub-Variable `GAS_DEPLOYMENT_ID` |
 
 Regeln:
 - Kein Schlüssel und kein Token im Code, im Repo, in Logs oder in Commit-Nachrichten.
@@ -152,12 +171,15 @@ Antwort immer JSON. Endgültig festgelegt in v0.2.
 ## 6. Repo-Struktur (geplant)
 
 ```
-/PROJEKT.md          dieses Dokument
-/CLAUDE.md           kurze Arbeitsanweisung für Claude Code, verweist auf PROJEKT.md
-/gas/                Apps-Script-Code (.gs) + appsscript.json + .clasp.json
-/docs/  oder /       PWA (index.html, app.js, style.css, manifest.json, sw.js)
-/.github/workflows/  Deployment nach Apps Script
+/PROJEKT.md                     dieses Dokument
+/CLAUDE.md                      kurze Arbeitsanweisung für Claude Code, verweist auf PROJEKT.md
+/gas/                           Apps-Script-Code (.gs) + appsscript.json
+/gas/Diagnose.gs                v0.1: Diagnose der Garmin-API (nur Logs)
+/docs/  oder /                  PWA (index.html, app.js, style.css, manifest.json, sw.js), ab v0.3
+/.github/workflows/deploy-gas.yml  Deployment nach Apps Script per clasp
 ```
+
+`gas/.clasp.json` liegt nicht im Repo, die Action erzeugt sie aus `GAS_SCRIPT_ID`.
 
 ---
 
@@ -172,15 +194,25 @@ Antwort immer JSON. Endgültig festgelegt in v0.2.
 
 ### Einmalige Einrichtung (darf am PC geschehen)
 
-- Apps-Script-API im Google-Konto aktivieren: https://script.google.com/home/usersettings
-- Apps-Script-Projekt anlegen, `scriptId` in `/gas/.clasp.json` eintragen.
-- `clasp login` einmal ausführen, Inhalt von `~/.clasprc.json` als GitHub-Secret `CLASPRC_JSON` speichern.
-- Web-App einmal bereitstellen, Deployment-ID als GitHub-Secret oder Variable `GAS_DEPLOYMENT_ID` speichern.
-- GitHub Pages für das Repo aktivieren.
-- Script Properties `GARMIN_API_KEY` und `WEBAPP_TOKEN` setzen (geht auch am Handy im Script-Editor).
-- Zeitgeber für den Sammler anlegen (kann auch per Code eingerichtet werden).
+Für v0.1:
 
-Falls Christof das Action-Deployment schon für ein anderes Projekt nutzt, wird es von dort übernommen.
+1. ~~Garmin API-Schlüssel erzeugen~~ (erledigt).
+2. Apps-Script-API im Google-Konto aktivieren: https://script.google.com/home/usersettings
+3. Neues Apps-Script-Projekt anlegen (https://script.google.com, Name z. B. „sport-sammler“). Unter Projekteinstellungen die **Skript-ID** kopieren.
+4. Im selben Projekt unter Projekteinstellungen → Skripteigenschaften `GARMIN_API_KEY` mit dem Garmin-Schlüssel anlegen.
+5. Am PC (Node.js nötig): `npx @google/clasp@3.4.1 login` ausführen und mit dem Google-Konto anmelden. Danach den Inhalt von `~/.clasprc.json` kopieren.
+6. GitHub → Repo `sport` → Settings → Secrets and variables → Actions:
+   - Secret `CLASPRC_JSON` = Inhalt von `~/.clasprc.json`
+   - Variable `GAS_SCRIPT_ID` = Skript-ID aus Schritt 3
+7. GitHub → Actions → „Apps Script deployen“ → „Run workflow“. Danach liegt `Diagnose.gs` im Apps-Script-Projekt.
+8. Im Script-Editor `diagnoseAlles` auswählen, ausführen, Berechtigung erteilen und das Ausführungsprotokoll lesen.
+
+Später:
+
+- Web-App einmal bereitstellen (v0.3), Bereitstellungs-ID als Variable `GAS_DEPLOYMENT_ID` speichern.
+- GitHub Pages für das Repo aktivieren (v0.3).
+- Script Property `WEBAPP_TOKEN` setzen (v0.3).
+- Zeitgeber für den Sammler anlegen (v0.2, kann auch per Code eingerichtet werden).
 
 ---
 
@@ -202,8 +234,8 @@ Falls Christof das Action-Deployment schon für ein anderes Projekt nutzt, wird 
 
 | Version | Inhalt | Ergebnis |
 |---|---|---|
-| v0.1 | Diagnose: Token holen, Aktivitäten der letzten 30 Tage listen, eine Aktivität im Detail und als FIT laden, alles loggen | Klarheit über Endpunkte, Felder, GPS, Historie |
-| v0.2 | Sammler + Sheet + Zeitgeber + Fehler-Mail, Deployment per GitHub Action | Ziel 1 erfüllt |
+| v0.1 | Diagnose: Token holen, Aktivitäten der letzten 30 Tage listen, eine Aktivität im Detail und als FIT laden, FIT auf GPS scannen, Historie zählen, alles loggen. Deployment per GitHub Action | Klarheit über Endpunkte, Felder, GPS, Historie |
+| v0.2 | Sammler + Sheet + Zeitgeber + Fehler-Mail | Ziel 1 erfüllt |
 | v0.3 | Web-App + PWA: Wochenansicht, Laufziel, Wochen-Serie | Ziele 2 und 3 |
 | v0.4 | Verlauf: Wochen/Monate/Jahre | Ziel 4 |
 | v0.5 | Karte mit allen Spuren, Filter nach Sportart und Jahr | Ziel 5 |
@@ -226,8 +258,7 @@ Falls Christof das Action-Deployment schon für ein anderes Projekt nutzt, wird 
 - Wochenziel: mindestens 1 Lauf oder 2 Läufe?
 - Wochenbeginn: Montag?
 - Repo-Name: `sport` oder anders?
-- Ist das clasp-Action-Deployment bereits in einem anderen Projekt eingerichtet?
-- Was sagen Garmins Nutzungsbedingungen zur Weitergabe an KI-Dienste?
+- Was sagen Garmins Nutzungsbedingungen zur Weitergabe an KI-Dienste? Davon hängt auch ab, ob Diagnose-Protokolle mit Werten (`WERTE_LOGGEN = true`) mit Claude geteilt werden dürfen.
 
 ---
 
@@ -236,3 +267,4 @@ Falls Christof das Action-Deployment schon für ein anderes Projekt nutzt, wird 
 | Version | Datum | Änderung |
 |---|---|---|
 | 0.1 | 2026-11-16 | Erste Projektbeschreibung aus der Planung im Chat |
+| 0.1.1 | 2026-11-17 | Swagger-Doku ausgewertet (Endpunkte, Felder, keine GPS-Spur außer FIT). Neu: `gas/Diagnose.gs` 0.1.0, `gas/appsscript.json`, `.github/workflows/deploy-gas.yml` 0.1.0, `CLAUDE.md` 0.1.0, `.gitignore`. Deployment per Action schon ab v0.1, Einrichtungsschritte präzisiert |

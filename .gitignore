@@ -1,0 +1,7 @@
+# .gitignore – Version 0.1.0 (2026-11-17)
+# Zugangsdaten und erzeugte Dateien nie ins Repo
+.clasprc.json
+gas/.clasp.json
+node_modules/
+*.fit
+*.zip
