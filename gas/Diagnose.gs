@@ -1,51 +1,40 @@
 /**
- * Diagnose.gs – v0.1: Diagnose der Garmin Connect Personal API
- * Version: 0.1.0 (2026-11-17)
+ * Diagnose.gs – Diagnose der Garmin Connect Personal API
+ * Version: 0.1.1 (2026-11-17)
  *
  * Nur Diagnose: Alle Funktionen loggen, nichts wird gespeichert.
+ * Nutzt Garmin.gs und Hilfen.gs.
  *
- * Voraussetzung: Script Property GARMIN_API_KEY (Projekteinstellungen → Skripteigenschaften).
- * Start: Im Script-Editor die Funktion diagnoseAlles() ausführen und die Ausgabe
- * im Ausführungsprotokoll lesen. Die Einzelfunktionen lassen sich auch einzeln starten.
+ * Start: Im Script-Editor diagnoseAlles() ausführen und das Ausführungsprotokoll lesen.
  *
  * Datenschutz:
- * - Der API-Schlüssel und das Zugriffstoken werden nie geloggt.
+ * - API-Schlüssel und Zugriffstoken werden nie geloggt.
  * - Mit WERTE_LOGGEN = false loggt die Diagnose nur Struktur und Zählungen:
  *   Feldnamen, Typen, Anzahlen, Garmin-Typen, aber keine Koordinaten, Zeiten oder Messwerte.
- *   So kann das Protokoll geteilt werden, ohne Aktivitätsdaten preiszugeben.
  * - Mit WERTE_LOGGEN = true kommen Beispielwerte dazu. Nur für den eigenen Blick.
  *
- * Grundlage: Swagger-Doku der Personal API (Stand 2026-11-17).
- * - Liste:   GET /activitylist-service/activities/search/activities
- * - Detail:  GET /activity-service/activity/{activityId}
- * - Datei:   GET /download-service/files/activity/{activityId} (ZIP mit Originaldatei)
- * Annahmen, die diese Diagnose prüft:
- * - Aufbau der Token-Antwort (in der Doku nicht beschrieben)
- * - Aufruf der Endpunkte mit „Authorization: Bearer <token>“ (laut FAQ OAuth2-Token)
- * - GPS-Spur nur in der FIT-Datei (die Doku kennt keinen Endpunkt für Spuren)
+ * Änderungen 0.1.1:
+ * - FIT-Download probiert mehrere Accept-Köpfe (0.1.0 bekam HTTP 406 mit application/json).
+ * - Beispiel-Aktivität ist eine mit startLatitude (hasPolyline fehlt in der Liste).
+ * - metadataDTO.fileFormat wird mit Wert geloggt (nur Dateiformat, keine persönlichen Daten).
+ * - Token, Abruf und Hilfsfunktionen liegen jetzt in Garmin.gs und Hilfen.gs.
+ * - diagnoseAlles() ohne Historie (ist geklärt), diagnoseHistorie() bleibt einzeln aufrufbar.
  */
 
 const WERTE_LOGGEN = false;
 
-const GARMIN_BASIS = 'https://personal.connectapi.garmin.com';
-const GARMIN_TOKEN_URL = GARMIN_BASIS + '/personalapitoken-service/personal-api/personal-api-key/token';
-const PFAD_LISTE = '/activitylist-service/activities/search/activities';
-const PFAD_DETAIL = '/activity-service/activity/';
-const PFAD_DATEI = '/download-service/files/activity/';
-const ZEITZONE = 'Europe/Zurich';
-const TOKEN_CACHE_SCHLUESSEL = 'garminZugriffstoken';
-const TOKEN_CACHE_SEKUNDEN = 6 * 60 * 60; // CacheService erlaubt höchstens 6 Stunden
+/** Accept-Köpfe, die der FIT-Download der Reihe nach probiert. */
+const FIT_ACCEPT_KANDIDATEN = ['*/*', 'application/octet-stream', 'application/x-zip-compressed', 'application/zip'];
 
 // ---------------------------------------------------------------------------
 // Gesamtablauf
 // ---------------------------------------------------------------------------
 
-/** Führt alle Diagnosen nacheinander aus. */
+/** Führt Token, Liste, Detail und FIT-Diagnose nacheinander aus. */
 function diagnoseAlles() {
-  log_('===== Diagnose v0.1.0 gestartet, WERTE_LOGGEN = ' + WERTE_LOGGEN + ' =====');
+  log_('===== Diagnose v0.1.1 gestartet, WERTE_LOGGEN = ' + WERTE_LOGGEN + ' =====');
 
-  const token = diagnoseToken();
-  if (!token) {
+  if (!diagnoseToken()) {
     log_('Abbruch: kein Zugriffstoken.');
     return;
   }
@@ -57,12 +46,12 @@ function diagnoseAlles() {
     log_('FEHLER in diagnoseListe: ' + e.message);
   }
 
-  // Für Detail und FIT bevorzugt eine Aktivität mit GPS-Spur
-  const mitSpur = liste.filter(function (a) { return a.hasPolyline === true; });
-  const beispiel = mitSpur.length ? mitSpur[0] : liste[0];
+  // Für Detail und FIT eine Aktivität mit GPS (Startkoordinate vorhanden)
+  const mitGps = liste.filter(hatGps_);
+  const beispiel = mitGps.length ? mitGps[0] : liste[0];
   if (beispiel) {
-    log_('Beispiel-Aktivität für Detail und FIT: Typ ' + typKey_(beispiel) +
-      ', hasPolyline ' + beispiel.hasPolyline + (WERTE_LOGGEN ? ', ID ' + beispiel.activityId : ''));
+    log_('Beispiel-Aktivität für Detail und FIT: Typ ' + typKey_(beispiel) + ', GPS ' + hatGps_(beispiel) +
+      (WERTE_LOGGEN ? ', ID ' + beispiel.activityId : ''));
     try {
       diagnoseDetail(beispiel.activityId);
     } catch (e) {
@@ -77,12 +66,6 @@ function diagnoseAlles() {
     log_('Keine Aktivität in den letzten 30 Tagen. Detail und FIT werden übersprungen.');
   }
 
-  try {
-    diagnoseHistorie();
-  } catch (e) {
-    log_('FEHLER in diagnoseHistorie: ' + e.message);
-  }
-
   log_('===== Diagnose beendet =====');
 }
 
@@ -91,83 +74,20 @@ function diagnoseAlles() {
 // ---------------------------------------------------------------------------
 
 /**
- * Holt ein frisches Zugriffstoken und loggt den Aufbau der Antwort (ohne Tokenwert).
- * Legt das Token für die übrigen Diagnosen im Script-Cache ab.
- * @return {string|null} Zugriffstoken oder null
+ * Holt ein frisches Zugriffstoken und loggt nur das Ergebnis (nie den Wert).
+ * @return {boolean} Token erhalten
  */
 function diagnoseToken() {
   log_('--- 1. Zugriffstoken ---');
-  const apiKey = PropertiesService.getScriptProperties().getProperty('GARMIN_API_KEY');
-  if (!apiKey) {
-    log_('FEHLER: Script Property GARMIN_API_KEY fehlt.');
-    return null;
-  }
-
   const t0 = Date.now();
-  const antwort = UrlFetchApp.fetch(GARMIN_TOKEN_URL, {
-    method: 'post',
-    headers: { Authorization: 'ApiKey ' + apiKey },
-    muteHttpExceptions: true
-  });
-  const code = antwort.getResponseCode();
-  const text = antwort.getContentText();
-  log_('HTTP ' + code + ' in ' + (Date.now() - t0) + ' ms, Content-Type: ' +
-    (kopfzeilen_(antwort)['content-type'] || '-') + ', Länge: ' + text.length + ' Zeichen');
-  ratenKopfzeilenLoggen_(antwort);
-
-  if (code !== 200) {
-    // Fehlertexte enthalten kein Token, Kürzen schützt trotzdem vor langen Antworten
-    log_('Antwort (gekürzt): ' + text.substring(0, 300));
-    return null;
-  }
-
-  let token = null;
-  let daten = null;
   try {
-    daten = JSON.parse(text);
+    const token = garminToken_(true);
+    log_('Token erhalten in ' + (Date.now() - t0) + ' ms, Länge ' + token.length + ' Zeichen.');
+    return true;
   } catch (e) {
-    daten = null;
+    log_('FEHLER: ' + e.message);
+    return false;
   }
-
-  if (daten && typeof daten === 'object') {
-    log_('Antwort ist JSON mit Feldern: ' + Object.keys(daten).map(function (k) {
-      return k + ' (' + typ_(daten[k]) + ')';
-    }).join(', '));
-    // Unkritische Felder mit Wert zeigen, alles mit „token“, „key“ oder „secret“ im Namen maskieren
-    Object.keys(daten).forEach(function (k) {
-      if (/token|key|secret|jwt/i.test(k) && k !== 'token_type' && k !== 'tokenType') return;
-      if (typeof daten[k] === 'number' || typeof daten[k] === 'boolean' ||
-          (typeof daten[k] === 'string' && daten[k].length < 60)) {
-        log_('  ' + k + ' = ' + daten[k]);
-      }
-    });
-    const kandidaten = ['access_token', 'accessToken', 'token'];
-    for (let i = 0; i < kandidaten.length; i++) {
-      if (typeof daten[kandidaten[i]] === 'string') {
-        token = daten[kandidaten[i]];
-        log_('Token gefunden im Feld „' + kandidaten[i] + '“, Länge ' + token.length + ' Zeichen.');
-        break;
-      }
-    }
-    if (!token) log_('WARNUNG: Kein bekanntes Token-Feld gefunden. Feldnamen oben prüfen.');
-  } else if (/^\S+$/.test(text.trim())) {
-    token = text.trim();
-    log_('Antwort ist kein JSON, sondern reiner Text ohne Leerzeichen. Wird als Token verwendet, Länge ' +
-      token.length + ' Zeichen.');
-  } else {
-    log_('WARNUNG: Antwort ist weder JSON noch ein einzelnes Token.');
-  }
-
-  if (token) {
-    CacheService.getScriptCache().put(TOKEN_CACHE_SCHLUESSEL, token, TOKEN_CACHE_SEKUNDEN);
-  }
-  return token;
-}
-
-/** Liefert das Token aus dem Cache oder holt ein neues. */
-function token_() {
-  const gecacht = CacheService.getScriptCache().get(TOKEN_CACHE_SCHLUESSEL);
-  return gecacht || diagnoseToken();
 }
 
 // ---------------------------------------------------------------------------
@@ -182,13 +102,7 @@ function diagnoseListe() {
   log_('--- 2. Aktivitäten der letzten 30 Tage ---');
   const heute = new Date();
   const vor30 = new Date(heute.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const params = {
-    startDate: datum_(vor30),
-    endDate: datum_(heute),
-    start: 0,
-    limit: 99
-  };
-  log_('Zeitraum ' + params.startDate + ' bis ' + params.endDate);
+  const params = { startDate: datum_(vor30), endDate: datum_(heute), start: 0, limit: 99 };
 
   const liste = garminJson_(PFAD_LISTE, params);
   if (!Array.isArray(liste)) {
@@ -204,22 +118,20 @@ function diagnoseListe() {
 
   // Felder, die das Sheet „Aktivitaeten" braucht
   const wichtig = ['activityId', 'startTimeLocal', 'activityType', 'distance', 'movingDuration',
-    'elapsedDuration', 'duration', 'elevationGain', 'averageHR', 'manufacturer', 'hasPolyline'];
+    'elapsedDuration', 'elevationGain', 'averageHR', 'manufacturer'];
   liste.forEach(function (a, i) {
-    let zeile = (i + 1) + '. ' + typKey_(a);
+    let zeile = (i + 1) + '. ' + typKey_(a) + ' | GPS ' + hatGps_(a);
     if (WERTE_LOGGEN) {
       zeile += ' | ' + a.startTimeLocal + ' | ' + runden_(a.distance / 1000, 2) + ' km | ' +
         runden_(a.movingDuration / 60, 1) + ' min bewegt | ' + runden_(a.elapsedDuration / 60, 1) +
         ' min gesamt | ' + runden_(a.elevationGain, 0) + ' hm | Puls ' + a.averageHR +
-        ' | ' + a.manufacturer + ' | Spur ' + a.hasPolyline + ' | ID ' + a.activityId;
+        ' | ' + a.manufacturer + ' | ID ' + a.activityId;
     } else {
       const fehlend = wichtig.filter(function (k) { return a[k] === undefined || a[k] === null; });
-      zeile += ' | hasPolyline ' + a.hasPolyline + ' | fehlende Felder: ' + (fehlend.join(', ') || 'keine');
+      zeile += ' | fehlende Felder: ' + (fehlend.join(', ') || 'keine');
     }
     log_(zeile);
   });
-
-  log_('Aufbau activityType (Beispiel): ' + JSON.stringify(liste[0].activityType));
   return liste;
 }
 
@@ -240,28 +152,16 @@ function diagnoseDetail(activityId) {
   }
   log_('Oberste Ebene: ' + Object.keys(d).map(function (k) { return k + ':' + typ_(d[k]); }).join(', '));
 
-  ['summaryDTO', 'metadataDTO', 'activityTypeDTO', 'timeZoneUnitDTO'].forEach(function (teil) {
-    const o = d[teil];
-    if (!o || typeof o !== 'object') {
-      log_(teil + ': nicht vorhanden');
-      return;
-    }
-    log_(teil + ' (' + Object.keys(o).length + ' Felder):');
-    if (WERTE_LOGGEN) {
-      logLang_(JSON.stringify(o));
-    } else {
-      logLang_(Object.keys(o).map(function (k) { return k + ':' + typ_(o[k]); }).join(', '));
-    }
-  });
-
-  // Hinweise auf das Aufzeichnungsgerät
   const meta = d.metadataDTO || {};
-  const geraeteFelder = Object.keys(meta).filter(function (k) { return /device|manufacturer|product/i.test(k); });
-  log_('Geräte-Felder in metadataDTO: ' + (geraeteFelder.join(', ') || 'keine'));
+  log_('metadataDTO.fileFormat = ' + JSON.stringify(meta.fileFormat));
+  log_('metadataDTO.isOriginal = ' + meta.isOriginal + ', manualActivity = ' + meta.manualActivity);
+
   if (WERTE_LOGGEN) {
-    geraeteFelder.forEach(function (k) { log_('  ' + k + ' = ' + JSON.stringify(meta[k])); });
+    ['summaryDTO', 'metadataDTO'].forEach(function (teil) {
+      log_(teil + ':');
+      logLang_(JSON.stringify(d[teil]));
+    });
   }
-  log_('splitSummaries: ' + (Array.isArray(d.splitSummaries) ? d.splitSummaries.length + ' Einträge' : 'keine'));
 }
 
 // ---------------------------------------------------------------------------
@@ -275,14 +175,22 @@ function diagnoseDetail(activityId) {
  */
 function diagnoseFit(activityId) {
   log_('--- 4. Originaldatei (FIT) ---');
-  const antwort = garminAbruf_(PFAD_DATEI + activityId, null);
-  if (antwort.getResponseCode() !== 200) return;
+  let antwort = null;
+  for (let i = 0; i < FIT_ACCEPT_KANDIDATEN.length; i++) {
+    log_('Versuch mit Accept: ' + FIT_ACCEPT_KANDIDATEN[i]);
+    antwort = garminAbruf_(PFAD_DATEI + activityId, null, { accept: FIT_ACCEPT_KANDIDATEN[i] });
+    if (antwort.getResponseCode() === 200) break;
+  }
+  if (antwort.getResponseCode() !== 200) {
+    log_('Download mit keinem Accept-Kopf möglich.');
+    return;
+  }
 
   const blob = antwort.getBlob();
   const groesse = blob.getBytes().length;
   log_('Content-Type: ' + (kopfzeilen_(antwort)['content-type'] || '-') + ', Größe: ' +
-    runden_(groesse / 1024, 1) + ' KB, Dateiname laut Kopfzeile: ' +
-    (kopfzeilen_(antwort)['content-disposition'] || '-'));
+    runden_(groesse / 1024, 1) + ' KB, Content-Disposition vorhanden: ' +
+    !!kopfzeilen_(antwort)['content-disposition']);
 
   let dateien;
   try {
@@ -296,8 +204,9 @@ function diagnoseFit(activityId) {
 
   dateien.forEach(function (datei) {
     const bytes = datei.getBytes();
-    log_('Datei: ' + datei.getName() + ', ' + runden_(bytes.length / 1024, 1) + ' KB');
-    if (!/\.fit$/i.test(datei.getName() || '') && !istFit_(bytes)) {
+    const endung = (String(datei.getName() || '').match(/\.[^.]+$/) || ['ohne Endung'])[0];
+    log_('Datei mit Endung ' + endung + ', ' + runden_(bytes.length / 1024, 1) + ' KB');
+    if (!istFit_(bytes)) {
       log_('  keine FIT-Datei, übersprungen');
       return;
     }
@@ -341,7 +250,7 @@ function istFit_(bytes) {
  * Minimaler FIT-Scanner: liest Kopf, Definitionen und Datennachrichten.
  * Zählt Nachrichten und wertet nur record-Nachrichten (global 20) für
  * position_lat (Feld 0), position_long (Feld 1) und altitude (Feld 2) aus.
- * Verkettete FIT-Dateien und Prüfsummen werden in v0.1 nicht beachtet.
+ * Verkettete FIT-Dateien und Prüfsummen werden nicht beachtet.
  * @param {number[]} rohBytes Bytes aus Blob.getBytes() (vorzeichenbehaftet)
  * @return {Object} Statistik
  */
@@ -448,145 +357,23 @@ function int32_(b, p, little) {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Historie: Wie weit reicht die API zurück?
+// 5. Historie (einzeln aufrufbar)
 // ---------------------------------------------------------------------------
 
-/**
- * Blättert durch alle Aktivitäten (ohne Datumsfilter) und zählt pro Jahr und
- * Garmin-Typ. Klärt, wie weit die Historie reicht, und liefert die Grundlage
- * für die Zuordnung Garmin-Typ → Sportart.
- */
+/** Zählt alle Aktivitäten pro Jahr und Garmin-Typ. */
 function diagnoseHistorie() {
   log_('--- 5. Historie ---');
-  const proSeite = 99;
-  const maxSeiten = 60; // Schutz: höchstens ca. 6000 Aktivitäten
+  const t0 = Date.now();
+  const alle = garminAktivitaeten_();
   const proJahr = {};
   const proTyp = {};
-  let gesamt = 0;
-  let aeltestes = null;
-  let seiten = 0;
-
-  for (let seite = 0; seite < maxSeiten; seite++) {
-    const liste = garminJson_(PFAD_LISTE, { start: seite * proSeite, limit: proSeite, sortOrder: 'desc' }, true);
-    seiten++;
-    if (!Array.isArray(liste) || !liste.length) break;
-    liste.forEach(function (a) {
-      gesamt++;
-      const jahr = String(a.startTimeLocal || '????').substring(0, 4);
-      proJahr[jahr] = (proJahr[jahr] || 0) + 1;
-      const t = typKey_(a);
-      proTyp[t] = (proTyp[t] || 0) + 1;
-      if (a.startTimeLocal && (!aeltestes || a.startTimeLocal < aeltestes)) aeltestes = a.startTimeLocal;
-    });
-    if (liste.length < proSeite) break;
-    Utilities.sleep(300); // Ratenlimits sind unbekannt, deshalb kurze Pause
-  }
-
-  log_('Seiten abgerufen: ' + seiten + ', Aktivitäten gesamt: ' + gesamt);
-  log_('Älteste Aktivität: Jahr ' + (aeltestes ? aeltestes.substring(0, 4) : '-') +
-    (WERTE_LOGGEN && aeltestes ? ' (' + aeltestes + ')' : ''));
+  alle.forEach(function (a) {
+    const jahr = String(a.startTimeLocal || '????').substring(0, 4);
+    proJahr[jahr] = (proJahr[jahr] || 0) + 1;
+    proTyp[typKey_(a)] = (proTyp[typKey_(a)] || 0) + 1;
+  });
+  log_('Aktivitäten gesamt: ' + alle.length + ' in ' + Math.round((Date.now() - t0) / 1000) + ' s');
   log_('Pro Jahr: ' + Object.keys(proJahr).sort().map(function (j) { return j + '=' + proJahr[j]; }).join(', '));
   log_('Pro Garmin-Typ: ' + Object.keys(proTyp).sort(function (x, y) { return proTyp[y] - proTyp[x]; })
     .map(function (t) { return t + '=' + proTyp[t]; }).join(', '));
-}
-
-// ---------------------------------------------------------------------------
-// Hilfsfunktionen
-// ---------------------------------------------------------------------------
-
-/**
- * Ruft einen Garmin-Endpunkt mit dem Zugriffstoken auf und loggt Status und Ratenkopfzeilen.
- * @param {string} pfad
- * @param {Object|null} params Query-Parameter
- * @param {boolean=} leise nur Fehler loggen
- * @return {GoogleAppsScript.URL_Fetch.HTTPResponse}
- */
-function garminAbruf_(pfad, params, leise) {
-  const url = GARMIN_BASIS + pfad + query_(params);
-  const t0 = Date.now();
-  const antwort = UrlFetchApp.fetch(url, {
-    method: 'get',
-    headers: { Authorization: 'Bearer ' + token_(), Accept: 'application/json' },
-    muteHttpExceptions: true
-  });
-  const code = antwort.getResponseCode();
-  if (!leise || code !== 200) {
-    // Pfad ohne IDs loggen, wenn keine Werte geloggt werden sollen
-    const anzeigePfad = WERTE_LOGGEN ? pfad : pfad.replace(/\/\d+(?=\/|$)/g, '/{id}');
-    log_('GET ' + anzeigePfad + query_(params) + ' → HTTP ' + code + ' in ' + (Date.now() - t0) + ' ms');
-    ratenKopfzeilenLoggen_(antwort);
-  }
-  if (code === 401) log_('  Hinweis: 401 heißt Token ungültig oder falsches Format im Authorization-Kopf.');
-  if (code === 429) log_('  Hinweis: 429 heißt Ratenlimit erreicht.');
-  if (code !== 200) log_('  Antwort (gekürzt): ' + antwort.getContentText().substring(0, 300));
-  return antwort;
-}
-
-/** Wie garminAbruf_, liefert aber das geparste JSON (oder null). */
-function garminJson_(pfad, params, leise) {
-  const antwort = garminAbruf_(pfad, params, leise);
-  if (antwort.getResponseCode() !== 200) return null;
-  try {
-    return JSON.parse(antwort.getContentText());
-  } catch (e) {
-    log_('WARNUNG: Antwort ist kein JSON: ' + e.message);
-    return null;
-  }
-}
-
-/** Baut den Query-String. */
-function query_(params) {
-  if (!params) return '';
-  const teile = Object.keys(params).map(function (k) {
-    return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
-  });
-  return teile.length ? '?' + teile.join('&') : '';
-}
-
-/** Kopfzeilen mit kleingeschriebenen Namen. */
-function kopfzeilen_(antwort) {
-  const roh = antwort.getAllHeaders();
-  const k = {};
-  Object.keys(roh).forEach(function (n) { k[n.toLowerCase()] = String(roh[n]); });
-  return k;
-}
-
-/** Loggt Kopfzeilen, die nach Ratenlimit aussehen. */
-function ratenKopfzeilenLoggen_(antwort) {
-  const k = kopfzeilen_(antwort);
-  const treffer = Object.keys(k).filter(function (n) { return /rate|limit|retry|quota/i.test(n); });
-  if (treffer.length) {
-    log_('  Ratenkopfzeilen: ' + treffer.map(function (n) { return n + '=' + k[n]; }).join(', '));
-  }
-}
-
-function typKey_(a) {
-  return (a && a.activityType && a.activityType.typeKey) || '?';
-}
-
-function typ_(wert) {
-  if (wert === null) return 'null';
-  if (Array.isArray(wert)) return 'array[' + wert.length + ']';
-  return typeof wert;
-}
-
-function datum_(d) {
-  return Utilities.formatDate(d, ZEITZONE, 'yyyy-MM-dd');
-}
-
-function runden_(zahl, stellen) {
-  if (typeof zahl !== 'number' || isNaN(zahl)) return zahl;
-  const f = Math.pow(10, stellen);
-  return Math.round(zahl * f) / f;
-}
-
-function log_(text) {
-  console.log(text);
-}
-
-/** Loggt lange Texte in Stücken, damit das Protokoll nichts abschneidet. */
-function logLang_(text) {
-  for (let i = 0; i < text.length; i += 4000) {
-    console.log(text.substring(i, i + 4000));
-  }
 }
