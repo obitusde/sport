@@ -1,6 +1,6 @@
 # PROJEKT.md – Sport-Tracker (Arbeitstitel „sport")
 
-Version: 0.5.0 (2026-11-17) – v0.5 Sportpunkte und Erfolge gebaut
+Version: 0.6.0 (2026-11-17) – v0.6 Form (relative Werte) und Erklärungen gebaut
 
 Dieses Dokument ist die Grundlage für die Entwicklung mit Claude Code. Es beschreibt Ziele, Architektur, Arbeitsweise und Fahrplan. Claude Code liest es vor jeder Arbeit und hält es aktuell.
 
@@ -118,7 +118,12 @@ Epix / Tacho → Garmin Connect (unverändert)
 - **Sportpunkte = Garmins Intensitätsminuten** (entschieden 2026-11-17): moderate Minuten ×1, intensive ×2, aus den Aktivitäten (`moderateIntensityMinutes`, `vigorousIntensityMinutes`). Pulsbasiert, dadurch sportartübergreifend vergleichbar: Eine lange Wanderung oder ein Skitag zählt wie entsprechend viele Läufe. Minuten im Alltag ohne Aktivität zählen nicht.
 - **Sportpunkte erst ab 2023** (Diagnose: Intensitätsminuten gibt es erst ab 2023, davor meist nicht einmal Puls). Ab 2023 fehlende Werte (ca. 240 Aktivitäten) werden geschätzt: Bewegungsminuten × persönlicher Faktor der Sportart (Summe Punkte / Summe Minuten der Aktivitäten mit echten Werten ab 2023), in der App mit „≈“ markiert. Berechnet in `gas/WebApp.gs`.
 - **Bestzeiten Laufen:** schnellste 1 km, 5 km, 10 km, Halbmarathon aus Garmins schnellsten Abschnitten; fehlen diese, zählt die Durchschnitts-Pace eines Laufs, der mindestens so lang war. Ohne Laufband, ohne unplausible Werte (schneller als 2:30 /km).
-- **Jahres-km-Stufen:** Laufen und Wandern 100, 250, 500, 1000 km; Rad 1000, 2500, 5000, 10000 km.
+- **Jahres-km-Stufen:** Laufen und Wandern 100, 250, 500, 1000 km; Rad 1000, 2500, 5000, 10000 km. Nur fürs laufende Jahr als Abzeichen; die frühere Jahrestabelle mit Stufen war unverständlich und ist entfernt (Feedback 2026-11-17).
+- **Unrealistische Aktivitäten** (Feedback: „Wanderung“ mit 795,7 km): Ø-Geschwindigkeit über die Bewegungszeit oder Distanz über einer Grenze je Sportart (Laufen 22 km/h / 60 km, Wandern 8 km/h / 70 km, Rad 45 km/h / 400 km, Schwimmen 6 km/h / 15 km). Solche Aktivitäten bleiben sichtbar („zählt nicht“), zählen aber nicht für km, Höhenmeter, Zeit, Bestmarken und Vergleiche. Sportpunkte zählen weiter (pulsbasiert). Berechnet in der App (`plausibilitaet` in `docs/app.js`).
+- **Relative Werte vor absoluten** (Feedback 2026-11-17): Die Ansicht „Form“ vergleicht mit dem eigenen Schnitt. 100 % = Ø der letzten 52 abgeschlossenen Wochen, verglichen mit den letzten 4 abgeschlossenen Wochen. Grün ab 105 %, orange unter 95 %. Dazu „Jahr bis heute“ gegenüber dem Vorjahr bis zum gleichen Tag.
+- **Laufökonomie** = Geschwindigkeit ÷ Ø-Puls (Meter pro Herzschlag) für Läufe draußen ab 3 km mit Puls, Median; angezeigt als „Pace bei Puls 150“. Vergleich letzte 3 Monate gegenüber den 3 Monaten davor und dem Vorjahr, Monatsverlauf über 24 Monate (100 = Ø 12 Monate).
+- **Bestzeiten** nur 1 km, 5 km, 10 km (Halbmarathon entfernt).
+- **Erklär-Seite** in der App („So funktioniert die App“, `docs/hilfe.js`), erreichbar über „?“ und die Einstellungen.
 - **Zwei Wochenziele mit eigener Serie:** Laufziel (Standard 2 Läufe) und Aktivziel (Standard 150 Sportpunkte, wie Garmin/WHO), beide in der App einstellbar.
 - **Gamification:** Abzeichen für Serien (4, 12, 26, 52 Wochen), Bestmarken (längster Lauf, schnellster 5er, meiste Höhenmeter an einem Tag), Jahres-km (500, 1000, 2000), Allrounder (3 Sportarten in einer Woche), Wochenbilanz („beste Woche seit …“).
 - **Fitness-Stand = Laufökonomie-Trend:** Tempo im Verhältnis zum Puls über Monate, als Diagramm im Verlauf, als kurze Zeile in der Wochenansicht. VO2max liefert die API nicht.
@@ -247,7 +252,7 @@ Die Web-App läuft als Christof („Ausführen als: Ich“) mit Zugriff „Jeder
 /gas/Diagnose.gs                Diagnose der Garmin-API (nur Logs)
 /gas/Sammler.gs                 v0.2: Sammler, Sheet, Zeitgeber, Fehler-Mail
 /gas/WebApp.gs                  v0.3: Schnittstelle für die App (doGet)
-/docs/                          App auf GitHub Pages: index.html, app.js, style.css, sw.js, manifest.json, icons/
+/docs/                          App auf GitHub Pages: index.html, app.js, form.js (Ansicht „Form“), hilfe.js (Erklärungen), style.css, sw.js, manifest.json, icons/
 /.github/workflows/deploy-gas.yml  Deployment nach Apps Script per clasp
 ```
 
@@ -329,7 +334,7 @@ Für v0.5: nichts einzurichten. Optional `webAppTesten` ausführen: loggt, wie v
 | v0.3 | Web-App + PWA: Wochenansicht, Laufziel, Wochen-Serie | Ziele 2 und 3 |
 | v0.4 | Detailansicht: Pace, Puls und Pulszonen, Trainingseffekt, Intensitätsminuten, Laufstil, schnellste Abschnitte. Spalte `details` mit Nachtrag, Diagnose der Intensitätsminuten | Mehr Einblick pro Aktivität |
 | v0.5 | Sportpunkte (Intensitätsminuten), Aktivziel 150 mit Serie, Abzeichen und Bestmarken | Motivation über alle Sportarten |
-| v0.6 | Verlauf: Wochen/Monate/Jahre je Sportart, Laufökonomie-Trend | Ziel 4, Fitness-Stand |
+| v0.6 | Form: relative Werte gegenüber dem eigenen Schnitt, Sportpunkte pro Woche, Laufökonomie, Jahr bis heute, aktive Stunden pro Jahr; Erklär-Seite; Filter für unrealistische Aktivitäten | Ziel 4, Fitness-Stand |
 | v0.7 | Karte mit allen Spuren, Filter nach Sportart und Jahr, Spuren der Historie nachladen | Ziel 5 |
 
 ### Ideen für später
@@ -355,6 +360,7 @@ Für v0.5: nichts einzurichten. Optional `webAppTesten` ausführen: loggt, wie v
 
 | Version | Datum | Änderung |
 |---|---|---|
+| 0.6.0 | 2026-11-17 | v0.6 nach Feedback: unrealistische Aktivitäten werden erkannt und zählen nicht für km/Zeit/Bestmarken; Halbmarathon-Bestzeit entfernt; Jahrestabelle durch Jahres-Abzeichen fürs laufende Jahr ersetzt; neue Ansicht „Form“ (`docs/form.js` 0.6.0) mit Formstand, Vergleich je Kennzahl, Sportpunkte-Diagramm, Laufökonomie, Jahr bis heute, aktive Stunden pro Jahr; Erklär-Seite (`docs/hilfe.js` 0.6.0); Wochenansicht zeigt Anteil am eigenen Schnitt; Zurück führt in die vorherige Ansicht. App 0.6.0 (`app.js`, `style.css`, `sw.js`, `index.html`). Keine Änderung an Apps Script |
 | 0.5.0 | 2026-11-17 | v0.5 Sportpunkte und Erfolge: `gas/WebApp.gs` 0.5.0 (Sportpunkte ab 2023 mit Schätzung, schnellste Abschnitte in der Liste, Einstellung `wochenzielPunkte`, Standard 150), `gas/Diagnose.gs` 0.1.3 (`diagnoseZusatzwerte`). App 0.5.0: Aktivziel mit Serie in der Wochenansicht, Karte „Erfolge dieser Woche“ (Wochenbilanz, neue Abzeichen, Bestmarken, Jahres-km, Allrounder), Ansicht „Erfolge“ (Serien-Abzeichen 4/12/26/52, Bestzeiten, Bestmarken, Jahres-Kilometer, Allrounder), zweites Ziel in den Einstellungen, Sportpunkte in der Detailansicht, Trainingseffekt mit Garmins deutschen Begriffen, „Unknown“ ausgeblendet |
 | 0.4.0 | 2026-11-17 | v0.4 Detailansicht: `gas/Sammler.gs` 0.4.0 (Spalte `details`, `details_`, `detailsNachtragen`, Kopfzeile wird automatisch ergänzt), `gas/WebApp.gs` 0.4.0 (Aktion `details`), `gas/Diagnose.gs` 0.1.2 (`diagnoseDetails`), App 0.4.0 (`app.js`, `style.css`, `sw.js`). Entscheidungen zu Sportpunkten, zwei Zielen, Gamification und Fitness-Stand eingetragen, Fahrplan v0.4–v0.7 neu. Arbeitsregel „erst Feedback sammeln“. Rest des alten Schnittstellen-Entwurfs in Abschnitt 5 entfernt |
 | 0.1 | 2026-11-16 | Erste Projektbeschreibung aus der Planung im Chat |

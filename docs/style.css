@@ -1,4 +1,4 @@
-/* style.css – Sport-App, Version 0.5.0 (2026-11-17) */
+/* style.css – Sport-App, Version 0.6.0 (2026-11-17) */
 
 :root {
   --hintergrund: #f6f5f2;
@@ -232,7 +232,74 @@ button.bestmarke { cursor: pointer; }
 .tabelle.jahre td { text-align: right; padding-right: 0; }
 .tabelle.jahre td:first-child { text-align: left; }
 .tabelle.jahre tr:first-child td { color: var(--text-2); font-size: 0.8rem; }
-.stufe { display: inline-block; font-size: 0.7rem; font-weight: 700; color: #fff; background: var(--farbe); border-radius: 6px; padding: 1px 5px; margin-left: 2px; }
+
+/* v0.6: Titel mit Hilfe-Knopf, Hinweise */
+.titel-zeile { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.klein-rund { width: 32px; height: 32px; font-weight: 700; color: var(--text-2); }
+.knopf.voll { width: 100%; margin-top: 12px; }
+.warnung { color: var(--warnung); font-weight: 600; }
+.hinweis-box { border: 1px solid var(--warnung); background: color-mix(in srgb, var(--warnung) 10%, var(--flaeche)); border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; font-size: 0.9rem; }
+
+/* Form */
+.form-kopf { text-align: center; }
+.form-zahl { font-size: 3rem; font-weight: 800; line-height: 1.1; }
+.form-zahl.klein { font-size: 2rem; }
+.form-text { font-weight: 600; margin-bottom: 6px; }
+.form-kopf.gut .form-zahl, .gut-text { color: var(--gut); }
+.form-kopf.tief .form-zahl, .tief-text { color: var(--warnung); }
+.neutral-text { color: var(--text); }
+.vgl { display: grid; grid-template-columns: 1fr 72px 52px; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--linie); }
+.vgl:last-child { border-bottom: 0; }
+.vgl-text { min-width: 0; }
+.vgl-name { font-weight: 600; display: block; }
+.vgl-text small { color: var(--text-2); font-size: 0.78rem; }
+.vgl-skala { position: relative; height: 8px; border-radius: 4px; background: var(--flaeche-2); overflow: hidden; }
+.vgl-balken { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; background: var(--text-2); }
+.vgl-balken.gut { background: var(--gut); }
+.vgl-balken.tief { background: var(--warnung); }
+.vgl-mitte { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 2px; background: var(--text); opacity: 0.5; }
+.vgl-wert { text-align: right; font-weight: 700; }
+.vgl-wert.gut { color: var(--gut); }
+.vgl-wert.tief { color: var(--warnung); }
+.oeko-kopf { margin-bottom: 4px; }
+.diagramm { width: 100%; height: auto; display: block; margin-top: 8px; overflow: visible; }
+.diagramm .bar-ja { fill: var(--aktiv); }
+.diagramm .bar-nein { fill: var(--aktiv); opacity: 0.35; }
+.diagramm .bar-jetzt { fill: none; stroke: var(--aktiv); stroke-width: 1.5; stroke-dasharray: 3 2; }
+.diagramm .linie-ziel { stroke: var(--text); stroke-width: 1; opacity: 0.6; }
+.diagramm .linie-schnitt { stroke: var(--text-2); stroke-width: 1; stroke-dasharray: 4 3; }
+.diagramm .linie-wert { fill: none; stroke: var(--laufen); stroke-width: 2; stroke-linejoin: round; }
+.diagramm .punkt-wert { fill: var(--laufen); }
+.diagramm .achse { fill: var(--text-2); font-size: 10px; }
+.diagramm .beschriftung { fill: var(--text); font-size: 10px; font-weight: 600; }
+.diagramm .beschriftung.schnitt { fill: var(--text-2); }
+.legende { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 0.78rem; color: var(--text-2); }
+.legende i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.lg-ja { background: var(--aktiv); }
+.lg-nein { background: var(--aktiv); opacity: 0.35; }
+.lg-jetzt { border: 1.5px dashed var(--aktiv); }
+.legende i.lg-ziel, .legende i.lg-schnitt, .legende i.lg-wert { width: 16px; height: 0; border-radius: 0; vertical-align: 3px; }
+.lg-ziel { border-top: 1.5px solid var(--text); opacity: 0.7; }
+.lg-schnitt { border-top: 1.5px dashed var(--text-2); }
+.lg-wert { border-top: 2px solid var(--laufen); }
+.jahre-balken { display: grid; gap: 8px; }
+.jb-zeile { display: grid; grid-template-columns: 44px 1fr 64px; gap: 10px; align-items: center; font-size: 0.9rem; }
+.jb-jahr { color: var(--text-2); }
+.jb-skala { height: 10px; background: var(--flaeche-2); border-radius: 5px; overflow: hidden; }
+.jb-skala span { display: block; height: 100%; background: var(--text-2); border-radius: 5px; }
+.jb-skala span.jetzt { background: var(--akzent); }
+.jb-wert { text-align: right; font-weight: 600; line-height: 1.1; }
+.jb-wert small { display: block; font-weight: 400; font-size: 0.7rem; color: var(--text-2); }
+
+/* Jahres-Abzeichen */
+.stufen { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.stufe { font-size: 0.7rem; font-weight: 700; border-radius: 6px; padding: 1px 6px; border: 1px dashed var(--linie); color: var(--text-2); background: none; margin: 0; }
+.stufe.an { border: 1px solid var(--farbe); background: var(--farbe); color: #fff; }
+
+/* Erklärungen */
+.hilfe p { margin: 0 0 10px; }
+.hilfe p:last-child { margin-bottom: 0; }
+.hilfe ul { margin: 0 0 10px; padding-left: 20px; }
 
 /* Tagesleiste */
 .tage { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; text-align: center; }
