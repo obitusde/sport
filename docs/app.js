@@ -1,6 +1,6 @@
 /**
  * app.js – Sport-App
- * Version: 0.11.0 (2026-11-18)
+ * Version: 0.12.0 (2026-11-18)
  *
  * Ansichten: Woche, Einstellungen.
  * Die App holt die Aktivitäten als Liste von der Apps-Script-Web-App und rechnet
@@ -44,10 +44,14 @@
  * in der Leiste „Optionen“ (Platz für sechs Reiter). Bereich „Wartung“ in den Einstellungen:
  * Diagnosen und Nachladen per Knopf, das Protokoll erscheint in der App (kein PC nötig).
  * Zurück aus der Detailansicht stellt die Scroll-Position wieder her.
+ * Änderungen 0.12.0: Mehrtagestouren (touren.js): Tour-Seite, Hinweis in der Detailansicht,
+ * Touren in Historie, Karte und Erfolge; Korrekturen aus der Web-App (Aktion „touren“).
+ * Unterseiten (Detail, Tour, Erklärungen) liegen auf einem Stapel, „Zurück“ führt Schritt
+ * für Schritt zurück (z. B. Etappe → Tour → Historie).
  */
 'use strict';
 
-const APP_VERSION = '0.11.0';
+const APP_VERSION = '0.12.0';
 
 const SPEICHER = {
   url: 'sport.url',
@@ -56,7 +60,8 @@ const SPEICHER = {
   einstellungen: 'sport.einstellungen',
   status: 'sport.status',
   schritte: 'sport.schritte',
-  details: 'sport.details'
+  details: 'sport.details',
+  touren: 'sport.touren'
 };
 
 /** Sportarten in Anzeigereihenfolge. */
@@ -100,14 +105,16 @@ const zustand = {
   webAppVersion: null,
   laedt: false, // false, 'garmin' (Sammler läuft) oder 'daten' (Liste wird geladen)
   fehler: null,
-  vorherigeAnsicht: 'woche',
+  verlauf: [],           // Stapel der Unterseiten: [{ansicht, detailId, tourSchluessel, scroll}]
   detailId: null,
+  tourSchluessel: null,
   detailLaedt: false,
   detailFehler: null,
   abgleich: { von: null, bis: null, laedt: false, ergebnis: null, fehler: null },
-  wartung: { laedt: null, ergebnis: null, fehler: null },
-  scrollMerker: {}
+  wartung: { laedt: null, ergebnis: null, fehler: null }
 };
+
+const UNTERSEITEN = ['detail', 'hilfe', 'tour'];
 
 // ---------------------------------------------------------------------------
 // Speicher (localStorage kann fehlen oder gesperrt sein)
@@ -228,12 +235,17 @@ async function allesLaden() {
   zustand.fehler = null;
   zeichnen();
   try {
-    const [liste, einst, status, schritte] = await Promise.all([
+    const [liste, einst, status, schritte, touren] = await Promise.all([
       api('aktivitaeten'),
       api('einstellungen'),
       api('status'),
-      api('schritte').catch(() => ({ tage: null })) // ältere Web-App ohne Schritte
+      api('schritte').catch(() => ({ tage: null })), // ältere Web-App ohne Schritte
+      api('touren').catch(() => ({ korrekturen: null }))
     ]);
+    if (Array.isArray(touren.korrekturen)) {
+      tourenZustand.korrekturen = touren.korrekturen;
+      schreiben(SPEICHER.touren, touren.korrekturen);
+    }
     if (Array.isArray(schritte.tage)) {
       zustand.schritteServer = schritte.tage;
       schreiben(SPEICHER.schritte, schritte.tage);
@@ -293,6 +305,7 @@ function ausSpeicherLaden() {
   zustand.einstellungen = Object.assign({}, STANDARD_EINSTELLUNGEN, lesen(SPEICHER.einstellungen, {}));
   zustand.status = lesen(SPEICHER.status, null);
   zustand.schritteServer = lesen(SPEICHER.schritte, []);
+  tourenZustand.korrekturen = lesen(SPEICHER.touren, []);
   schritteZusammenfuehren();
 }
 
@@ -1242,6 +1255,8 @@ function ansichtErfolge() {
   html += '<h2>Jahres-Abzeichen ' + new Date().getFullYear() + '</h2><section class="karte">' + jahresAbzeichenHtml() + '</section>';
   html += '<p class="leise klein-text">Die Stufen richten sich nach deinen letzten 3 Jahren: Bronze = halbes normales Jahr, Silber = dein Schnitt, Gold = dein bestes dieser Jahre, Rekord = dein bestes Jahr überhaupt. Jedes Jahr startet bei null.</p>';
 
+  html += tourenErfolgeHtml();
+
   const ar = allrounderWochen();
   html += `<h2>Allrounder</h2><section class="karte"><p style="margin:0"><b>${ar.length}</b> ${ar.length === 1 ? 'Woche' : 'Wochen'} mit mindestens 3 Sportarten${ar.length ? ' · zuletzt KW ' + kalenderwoche(ar[ar.length - 1]) + '/' + ar[ar.length - 1].getFullYear() : ''}</p></section>`;
   return html;
@@ -1542,10 +1557,7 @@ function gespeicherteDetails() {
 
 /** Merkt sich die aktuelle Ansicht, damit „Zurück“ dorthin führt. */
 function unterseiteOeffnen(ansicht, zustandFuerHistory) {
-  if (zustand.ansicht !== 'detail' && zustand.ansicht !== 'hilfe') {
-    zustand.vorherigeAnsicht = zustand.ansicht;
-    zustand.scrollMerker[zustand.ansicht] = window.scrollY;
-  }
+  zustand.verlauf.push({ ansicht: zustand.ansicht, detailId: zustand.detailId, tourSchluessel: zustand.tourSchluessel, scroll: window.scrollY });
   zustand.ansicht = ansicht;
   history.pushState(zustandFuerHistory, '');
   window.scrollTo(0, 0);
@@ -1601,6 +1613,8 @@ function ansichtDetail() {
     <div><h1>${esc(a.name || SPORT_NAME[a.sportart])}</h1>
     <span class="leise">${esc(SPORT_NAME[a.sportart] || a.sportart)} · ${datumText}${d.ort ? ' · ' + esc(d.ort) : ''}</span></div>
   </header>`;
+
+  html += tourHinweisHtml(a);
 
   if (a.unplausibel) {
     html += `<div class="hinweis-box">Diese Aktivität ist unrealistisch (${esc(a.unplausibel)}). Vermutlich lief die Aufzeichnung im Auto oder Zug weiter. Sie zählt nicht für Kilometer, Höhenmeter, Bestmarken und Vergleiche, Sportpunkte zählen weiter.</div>`;
@@ -1696,13 +1710,15 @@ function zeichnen() {
   const inhalt = document.getElementById('inhalt');
   const ansichten = {
     einstellungen: ansichtEinstellungen, erfolge: ansichtErfolge, form: ansichtForm, karte: ansichtKarte,
-    detail: ansichtDetail, hilfe: ansichtHilfe, woche: ansichtWoche, historie: ansichtHistorie
+    detail: ansichtDetail, hilfe: ansichtHilfe, woche: ansichtWoche, historie: ansichtHistorie, tour: ansichtTour
   };
   inhalt.innerHTML = (ansichten[zustand.ansicht] || ansichtWoche)();
   if (zustand.ansicht === 'karte') karteNachZeichnen();
   if (zustand.ansicht === 'detail' && zustand.detailId) detailKarteNachZeichnen(zustand.detailId);
+  if (zustand.ansicht === 'tour') tourKarteNachZeichnen();
   // Detail und Erklärungen gehören zur Ansicht, aus der sie geöffnet wurden
-  const reiter = (zustand.ansicht === 'detail' || zustand.ansicht === 'hilfe') ? zustand.vorherigeAnsicht : zustand.ansicht;
+  const basis = UNTERSEITEN.indexOf(zustand.ansicht) >= 0 ? zustand.verlauf.find(v => UNTERSEITEN.indexOf(v.ansicht) < 0) : null;
+  const reiter = basis ? basis.ansicht : zustand.ansicht;
   document.querySelectorAll('.leiste-knopf').forEach(k => {
     const aktiv = k.dataset.ansicht === reiter;
     k.classList.toggle('aktiv', aktiv);
@@ -1757,6 +1773,7 @@ document.addEventListener('click', ereignis => {
   if (!ziel) return;
   if (ziel.dataset.ansicht) {
     if (ziel.dataset.ansicht === 'karte') karteZustand.veraltet = true; // beim Öffnen neu laden
+    zustand.verlauf = [];
     zustand.ansicht = ziel.dataset.ansicht;
     if (zustand.ansicht === 'woche') zustand.wocheVersatz = 0;
     zeichnen();
@@ -1785,6 +1802,11 @@ document.addEventListener('click', ereignis => {
     case 'frei-plus': zielAendern('alltagFrei', 500, 20000, 'Schritte frei'); break;
     case 'propunkt-minus': zielAendern('alltagProPunkt', -25, 2000, 'Schritte pro Punkt', 20); break;
     case 'propunkt-plus': zielAendern('alltagProPunkt', 25, 2000, 'Schritte pro Punkt', 20); break;
+    case 'karte-touren':
+      karteZustand.nurTouren = !karteZustand.nurTouren;
+      karteZustand.sicht = null;
+      zeichnen();
+      break;
     case 'karte-filter':
       karteZustand.filter[ziel.dataset.sportart] = !karteZustand.filter[ziel.dataset.sportart];
       zeichnen();
@@ -1849,11 +1871,13 @@ window.addEventListener('popstate', () => {
     zeichnen();
     return;
   }
-  if (zustand.ansicht === 'detail' || zustand.ansicht === 'hilfe') {
-    zustand.ansicht = zustand.vorherigeAnsicht || 'woche';
-    zustand.detailId = null;
+  if (zustand.verlauf.length) {
+    const v = zustand.verlauf.pop();
+    zustand.ansicht = v.ansicht;
+    zustand.detailId = v.detailId;
+    zustand.tourSchluessel = v.tourSchluessel;
     zeichnen();
-    window.scrollTo(0, zustand.scrollMerker[zustand.ansicht] || 0);
+    window.scrollTo(0, v.scroll || 0);
   }
 });
 
@@ -1875,6 +1899,7 @@ verbindungAnApp();
 if (!verbindung().token) zustand.ansicht = 'einstellungen';
 zeichnen();
 allesLaden();
+spurenLaden(false, true); // Spuren aus dem Zwischenspeicher, für Touren in Historie und Details
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => { /* offline-Funktion fehlt dann, App läuft trotzdem */ });

@@ -1,6 +1,6 @@
 /**
  * karte.js – Ansicht „Karte“ (Heatmap aller Spuren) und Spur in der Detailansicht
- * Version: 0.11.0 (2026-11-18)
+ * Version: 0.12.0 (2026-11-18)
  *
  * - Grundkarte: graue Landeskarte von swisstopo (WMTS, Web-Mercator), etwas blasser, damit
  *   die Spuren vorne stehen; umschaltbar auf die farbige Landeskarte oder OpenStreetMap.
@@ -21,6 +21,9 @@
  * - Ab 0.11.0: Angetippte Spuren werden gelb markiert (in der Liste des Popups lässt sich eine
  *   einzelne wählen); das Popup zeigt Höhenmeter auf und ab. Weit herausgezoomt werden die
  *   Linien breiter und jede Spur bekommt einen Punkt, damit man sieht, wo man war.
+ * - Ab 0.12.0: Filter „Nur Touren“ (touren.js), im Popup ein Knopf zur Tour. Die Spuren werden
+ *   beim Start aus dem Zwischenspeicher gelesen (für die Touren), vom Netz erst beim Öffnen
+ *   der Karte oder einer Tour.
  * - Die Spuren werden beim Öffnen der Karte neu geladen (zuerst aus dem Cache gezeigt).
  * Leaflet 1.9.4 wird erst beim ersten Öffnen einer Karte von cdnjs geladen (mit SRI-Prüfsumme).
  * Nutzt Funktionen und Konstanten aus app.js (wird vor app.js geladen, aber erst später aufgerufen).
@@ -58,6 +61,7 @@ function breitenFaktor(zoom) {
 
 const karteZustand = {
   filter: { wandern: true, rad: true, ski: true, laufen: false },
+  nurTouren: false,
   jahr: 'alle',
   grundkarte: 'grau',
   wanderwege: false,
@@ -69,6 +73,7 @@ const karteZustand = {
   fehler: null,
   karte: null,        // Leaflet-Karte der Ansicht „Karte“
   detailKarte: null,
+  tourKarte: null,
   vollbild: null,     // null, 'karte' oder 'detail'
   feineSpuren: new Map(),
   heat: null,         // {schluessel, linien, spuren}
@@ -153,7 +158,12 @@ function spurenAuspacken(daten) {
   }));
 }
 
-async function spurenLaden(erzwingen) {
+/**
+ * Lädt die Spuren: zuerst aus dem Zwischenspeicher, dann vom Netz.
+ * @param {boolean} erzwingen auch laden, wenn schon Spuren da sind
+ * @param {boolean} nurCache nur aus dem Zwischenspeicher (vom Netz nur, wenn dort nichts liegt)
+ */
+async function spurenLaden(erzwingen, nurCache) {
   if (karteZustand.laedt || (karteZustand.spuren && !erzwingen)) return;
   karteZustand.laedt = true;
   karteZustand.fehler = null;
@@ -164,7 +174,12 @@ async function spurenLaden(erzwingen) {
       const r = await cache.match('spuren.json');
       if (r) {
         spurenAuspacken(await r.json());
-        if (zustand.ansicht === 'karte') zeichnen();
+        if (nurCache) {
+          karteZustand.laedt = false;
+          spurenGeladen();
+          return;
+        }
+        spurenGeladen();
       }
     } catch (e) { /* kein Cache verfügbar */ }
   }
@@ -179,13 +194,22 @@ async function spurenLaden(erzwingen) {
     karteZustand.fehler = e.message;
   } finally {
     karteZustand.laedt = false;
-    if (zustand.ansicht === 'karte') zeichnen();
+    spurenGeladen();
   }
 }
 
+/** Nach dem Laden der Spuren die Ansichten neu zeichnen, die sie brauchen. */
+function spurenGeladen() {
+  const a = zustand.ansicht;
+  if (a === 'karte' || a === 'tour' || a === 'detail' || a === 'erfolge' ||
+    (a === 'historie' && typeof historieZustand !== 'undefined' && historieZustand.modus === 'touren')) zeichnen();
+}
+
 function gefilterteSpuren() {
+  const touren = karteZustand.nurTouren ? tourenErgebnis() : null;
   return (karteZustand.spuren || []).filter(s =>
-    karteZustand.filter[s.sportart] && (karteZustand.jahr === 'alle' || s.jahr === Number(karteZustand.jahr)));
+    karteZustand.filter[s.sportart] && (karteZustand.jahr === 'alle' || s.jahr === Number(karteZustand.jahr)) &&
+    (!touren || touren.proAktivitaet.has(s.id)));
 }
 
 // ---------------------------------------------------------------------------
@@ -301,7 +325,7 @@ function heatBerechnen(liste) {
 
 function heatHolen(liste) {
   const schluessel = liste.length + ':' + liste.reduce((n, s) => n + s.pfad.length, 0) + ':' +
-    KARTE_SPORTARTEN.map(sa => karteZustand.filter[sa] ? 1 : 0).join('') + ':' + karteZustand.jahr;
+    KARTE_SPORTARTEN.map(sa => karteZustand.filter[sa] ? 1 : 0).join('') + ':' + karteZustand.jahr + ':' + karteZustand.nurTouren;
   if (!karteZustand.heat || karteZustand.heat.schluessel !== schluessel || karteZustand.heat.spuren !== karteZustand.spuren) {
     karteZustand.heat = { schluessel, spuren: karteZustand.spuren, linien: heatBerechnen(liste) };
   }
@@ -380,6 +404,8 @@ function ansichtKarte() {
     <div class="filter-reihe">
       ${KARTE_SPORTARTEN.map(sa => `<button type="button" class="chip ${karteZustand.filter[sa] ? 'an' : ''}" style="--farbe: var(--${sa})"
         data-aktion="karte-filter" data-sportart="${sa}" aria-pressed="${karteZustand.filter[sa]}">${SPORT_NAME[sa]}</button>`).join('')}
+      <button type="button" class="chip ${karteZustand.nurTouren ? 'an' : ''}" style="--farbe: var(--text-2)"
+        data-aktion="karte-touren" aria-pressed="${karteZustand.nurTouren}">Nur Touren</button>
       <select data-karte="jahr" aria-label="Jahr">
         <option value="alle" ${karteZustand.jahr === 'alle' ? 'selected' : ''}>Alle Jahre</option>
         ${jahre.map(j => `<option value="${j}" ${String(karteZustand.jahr) === String(j) ? 'selected' : ''}>${j}</option>`).join('')}
@@ -444,15 +470,25 @@ async function karteNachZeichnen() {
   });
 
   karte.on('click', e => karteAngetippt(karte, liste, e));
+  const vollbildVerlassen = () => {
+    if (karteZustand.vollbild) {
+      karteZustand.vollbild = null;
+      document.body.classList.remove('vollbild-aktiv');
+      history.replaceState(null, '');
+    }
+  };
   karte.on('popupopen', e => {
     e.popup.getElement().querySelectorAll('.popup-knopf').forEach(knopf => {
       knopf.addEventListener('click', () => {
-        if (karteZustand.vollbild) {
-          karteZustand.vollbild = null;
-          document.body.classList.remove('vollbild-aktiv');
-          history.replaceState(null, '');
-        }
+        vollbildVerlassen();
         detailOeffnen(knopf.dataset.id);
+      });
+    });
+    e.popup.getElement().querySelectorAll('.popup-tour').forEach(knopf => {
+      knopf.addEventListener('click', ev => {
+        ev.stopPropagation();
+        vollbildVerlassen();
+        tourOeffnen(knopf.dataset.tour);
       });
     });
   });
@@ -550,6 +586,7 @@ function karteAngetippt(karte, liste, e) {
     const hoehe = a.hm || a.hmAb ? `<br><span class="leise">↑ ${zahlFormat0.format(a.hm || 0)} m${typeof a.hmAb === 'number' ? ' · ↓ ' + zahlFormat0.format(a.hmAb) + ' m' : ''}</span>` : '';
     return `<li class="popup-eintrag" data-id="${esc(s.id)}"><b>${esc(a.name || SPORT_NAME[s.sportart])}</b><br>
       <span class="leise">${esc(datumLang(lokalesDatum(s.datum)))}${a.km ? ' · ' + km(a.km) : ''}${a.min ? ' · ' + dauer(a.min) : ''}</span>${hoehe}
+      ${tourPopupZeile(s.id)}
       <button type="button" class="knopf klein popup-knopf" data-id="${esc(s.id)}">Details</button></li>`;
   }).join('');
   const popup = L.popup({ maxWidth: 290 })
@@ -564,7 +601,7 @@ function karteAngetippt(karte, liste, e) {
   if (element) {
     element.querySelectorAll('.popup-eintrag').forEach(li => {
       li.addEventListener('click', ev => {
-        if (ev.target.closest('.popup-knopf')) return;
+        if (ev.target.closest('.popup-knopf, .popup-tour')) return;
         const sp = treffer.find(x => x.id === li.dataset.id);
         if (!sp) return;
         element.querySelectorAll('.popup-eintrag').forEach(x => x.classList.toggle('gewaehlt', x === li));

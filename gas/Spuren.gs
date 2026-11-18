@@ -1,6 +1,6 @@
 /**
  * Spuren.gs – GPS-Spuren für die Karte (Heatmap) und die Detailansicht
- * Version: 0.11.0 (2026-11-18)
+ * Version: 0.12.0 (2026-11-18)
  *
  * Quelle: Originaldatei der Aktivität (ZIP mit FIT), Garmin-Endpunkt
  * /download-service/files/activity/{id} mit „Accept: *\/*“ (siehe Diagnose 0.1.1).
@@ -40,6 +40,8 @@
  *   werden noch einmal versucht; vorhandene gute Spuren (Version 2) bleiben, damit nicht
  *   wieder die ganze Historie von Garmin geladen wird. spurenStand() loggt eine Übersicht
  *   (für die Wartung in der App).
+ * Änderungen 0.12.0: diagnoseSpurFilter listet auch erfolgreiche Spuren (Dateityp, Punkte),
+ *   damit ein leeres Protokoll nicht missverständlich ist.
  */
 
 const BLATT_SPUREN = 'Spuren';
@@ -104,11 +106,14 @@ function diagnoseSpurFilter(anzahl) {
       return;
     }
     if (!s.mitZeit) ohneZeit++;
+    const quelle = s.format || 'FIT';
     if (s.entferntKm > 0 || s.teile > 1) {
       mitSchnitt++;
-      log_((n + 1) + '. ' + k.sportart + ': ' + s.teile + ' Teil(e), entfernt ' + runden_(s.entferntKm, 1) +
+      log_((n + 1) + '. ' + k.sportart + ' (' + quelle + ', ' + s.punkte + ' Punkte): ' + s.teile + ' Teil(e), entfernt ' + runden_(s.entferntKm, 1) +
         ' km (zu schnell ' + runden_(s.schnellKm, 1) + ' km, Sprünge/Lücken ' + s.spruenge + ')' +
         (s.mitZeit ? '' : ', ohne Zeitstempel'));
+    } else {
+      log_((n + 1) + '. ' + k.sportart + ' (' + quelle + ', ' + s.punkte + ' Punkte): ok, nichts entfernt' + (s.mitZeit ? '' : ', ohne Zeitstempel'));
     }
     Utilities.sleep(150);
   });
@@ -331,6 +336,7 @@ function spurLaden_(id, sportart) {
   }
   let punkte = [];
   let fitGefunden = 0;
+  let format = null;
   dateien.forEach(function (d) {
     const bytes = d.getBytes();
     if (!punkte.length && bytes.length > 12 && bytes[8] === 0x2e && bytes[9] === 0x46 && bytes[10] === 0x49 && bytes[11] === 0x54) {
@@ -354,6 +360,7 @@ function spurLaden_(id, sportart) {
         const x = xmlPunkte_(d.getDataAsString('UTF-8'));
         grund.push('Datei .' + endung + (x.format ? ' (' + x.format + ', ' + x.punkte.length + ' Punkte)' : ' (kein GPX/TCX)'));
         punkte = x.punkte;
+        format = x.format;
       } catch (e) {
         grund.push('Lesefehler: ' + e.message);
       }
@@ -367,7 +374,8 @@ function spurLaden_(id, sportart) {
   const f = spurFiltern_(punkte, sportart);
   const ergebnis = {
     status: 'ok', punkte: punkte.length, grob: '', fein: '', teile: f.teile.length,
-    entferntKm: f.entferntM / 1000, schnellKm: f.schnellM / 1000, spruenge: f.spruenge, mitZeit: f.mitZeit
+    entferntKm: f.entferntM / 1000, schnellKm: f.schnellM / 1000, spruenge: f.spruenge, mitZeit: f.mitZeit,
+    format: format || 'FIT'
   };
   if (!f.teile.length) {
     ergebnis.status = 'keine';

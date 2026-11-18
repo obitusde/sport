@@ -1,6 +1,6 @@
 /**
  * WebApp.gs – Schnittstelle für die App (JSON)
- * Version: 0.11.0 (2026-11-18)
+ * Version: 0.12.0 (2026-11-18)
  *
  * Aufruf: GET <webapp-url>?token=<WEBAPP_TOKEN>&aktion=<aktion>&...
  *
@@ -19,6 +19,8 @@
  * | spur              | feine Spur einer Aktivität (id): {fein, entferntKm}             |
  * | abgleich          | Zeitraum mit Garmin vergleichen (von, bis, uebernehmen=1), siehe Abgleich.gs |
  * | wartung           | Diagnose oder Einrichtung starten (art), liefert das Protokoll  |
+ * | touren            | Korrekturen an den Mehrtagestouren: {korrekturen}, siehe Touren.gs |
+ * | tourSetzen        | eine Korrektur setzen oder löschen (art, schluessel, wert)      |
  *
  * Jede Antwort ist JSON: {ok: true, version, …} oder {ok: false, fehler}.
  * Ohne gültiges Token liefert die Web-App keine Daten.
@@ -50,9 +52,10 @@
  * Änderungen 0.11.0: Liste enthält hmAb (Höhenmeter abwärts) und ort (Garmins Ortsname) aus
  *   der Spalte „details“. Aktion „wartung“: startet eine feste Auswahl von Diagnosen und
  *   Einrichtungen (WARTUNG) und liefert deren Protokoll, damit dafür kein PC nötig ist.
+ * Änderungen 0.12.0: Aktionen „touren“ und „tourSetzen“ (Touren.gs).
  */
 
-const WEBAPP_VERSION = '0.11.0';
+const WEBAPP_VERSION = '0.12.0';
 
 /**
  * Wartung aus der App: nur diese Funktionen sind erlaubt. Alle loggen nur Zählungen.
@@ -233,6 +236,10 @@ function aktionAusfuehren_(p) {
       return Object.assign(basis, { id: String(p.id), details: detailsLesen_(p.id) });
     case 'abgleich':
       return Object.assign(basis, abgleich_(p.von, p.bis, String(p.uebernehmen) === '1'));
+    case 'touren':
+      return Object.assign(basis, tourenLesen_());
+    case 'tourSetzen':
+      return Object.assign(basis, tourSetzen_(p));
     case 'wartung': {
       const w = WARTUNG[p.art];
       if (!w) throw new Error('unbekannte Wartung: ' + p.art);

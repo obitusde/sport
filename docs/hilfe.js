@@ -1,6 +1,6 @@
 /**
  * hilfe.js – Erklär-Seite „So funktioniert die App“
- * Version: 0.11.0 (2026-11-18)
+ * Version: 0.12.0 (2026-11-18)
  *
  * Erreichbar über das „?“ in „Form“ und „Erfolge“ sowie über die Einstellungen.
  * Werte wie Ziele und Grenzen werden aus app.js gelesen, damit der Text stimmt,
@@ -101,6 +101,16 @@ function ansichtHilfe() {
     ${abschnitt('Historie', `
       <p>Unter „Historie“ findest du alle Aktivitäten seit Beginn. Die Suche durchsucht Name, Ort, Sportart, Jahr und Monat (Umlaute egal, mehrere Wörter möglich, z. B. „Leytron 2025“).</p>
       <p>Filtern kannst du nach Sportart (mehrere wählbar), Jahr, Länge und Ort (Garmins Ortsname, Orte ab zwei Aktivitäten), sortieren nach Datum, Distanz, Höhenmeter oder Dauer. Oben steht die Summe der Treffer. Tippen öffnet die Details, „Zurück“ führt an dieselbe Stelle der Liste.</p>`)}
+
+    ${abschnitt('Mehrtagestouren', `
+      <p>Die App erkennt Wander- und Radtouren über mehrere Tage automatisch: Eine <b>Etappe</b> beginnt ungefähr dort (bis 3 km), wo die vorherige aufgehört hat, mit höchstens 2 Pausentagen dazwischen. Eine Tour hat nur eine Sportart, mindestens zwei Etappen an verschiedenen Tagen und entfernt sich mindestens 20 km vom Start.</p>
+      <ul>
+        <li><b>Ausflug:</b> eine Rundtour am Etappenort, z. B. wenn du zweimal am selben Ort übernachtest.</li>
+        <li><b>Lücke:</b> Zwischen zwei Aufzeichnungen am selben Tag (oder am nächsten Tag mitten in einer Tour) darf die nächste Etappe auch weiter weg beginnen, z. B. nach einem Stück mit dem Zug. Auf der Karte ist dort keine Linie.</li>
+        <li><b>Pendeln</b> zählt nie: Fahrten zwischen zwei Orten, an denen du sehr oft startest oder ankommst (z. B. Zuhause und Arbeit), gehören zu keiner Tour.</li>
+      </ul>
+      <p>Touren findest du unter Historie → „Touren“, in den Erfolgen und auf der Karte (Filter „Nur Touren“). Die Tour-Seite zeigt alle Etappen auf einer Karte, jeden Tag in einer eigenen Farbe, dazu Summen und die Etappenliste mit Pausentagen.</p>
+      <p><b>Korrigieren:</b> Auf der Tour-Seite umbenennen, mit „×“ eine Aktivität herausnehmen oder die ganze Tour auflösen. Fehlt eine Aktivität, öffne sie und tippe auf „Zu Tour hinzufügen“. Die Korrekturen gelten auf allen Geräten.</p>`)}
 
     ${abschnitt('Mit Garmin abgleichen', `
       <p>Die App übernimmt neue Aktivitäten von Garmin automatisch, spätere Änderungen aber nicht. Hast du bei Garmin eine Aktivität geändert (z. B. Sportart, Name, gekürzt) oder gelöscht, gehe zu Einstellungen → „Mit Garmin abgleichen“.</p>

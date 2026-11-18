@@ -1,4 +1,4 @@
-/* style.css – Sport-App, Version 0.11.0 (2026-11-18) */
+/* style.css – Sport-App, Version 0.12.0 (2026-11-18) */
 
 :root {
   --hintergrund: #f6f5f2;
@@ -538,3 +538,30 @@ body.vollbild-aktiv { overflow: hidden; }
   font-size: 0.9rem;
   box-shadow: 0 4px 16px rgb(0 0 0 / 0.2);
 }
+
+/* Touren (ab 0.12.0) */
+.umschalter { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 12px; background: var(--flaeche-2); margin: 4px 0 10px; }
+.umschalter button { font: inherit; font-weight: 600; border: 0; border-radius: 9px; padding: 8px; background: none; color: var(--text-2); cursor: pointer; }
+.umschalter button.an { background: var(--flaeche); color: var(--text); box-shadow: var(--schatten); }
+.historie-filter.nur-jahr { grid-template-columns: 1fr; }
+.tour-eintrag .eintrag-name { white-space: normal; }
+.tour-zeile { display: flex; gap: 6px; align-items: center; }
+.tour-zeile .eintrag { flex: 1; min-width: 0; }
+.tour-entfernen { flex: none; margin-bottom: 6px; color: var(--text-2); font-size: 1.1rem; }
+.tour-pause { font-size: 0.8rem; color: var(--text-2); padding: 4px 12px 10px; font-style: italic; }
+.tour-luecke { color: var(--warnung); }
+.hinweis-tour {
+  display: block; width: 100%; text-align: left; font: inherit; color: var(--text); cursor: pointer;
+  background: var(--flaeche); border: 1px solid var(--linie); border-left: 4px solid var(--farbe, var(--akzent));
+  border-radius: 12px; padding: 10px 12px; margin: 0 0 12px;
+}
+.hinweis-tour span, .hinweis-tour small { display: block; font-size: 0.8rem; color: var(--text-2); }
+.hinweis-tour b { display: block; }
+.tour-hinzu { display: flex; gap: 8px; align-items: center; margin: 0 0 12px; }
+.tour-hinzu select { flex: 1; min-width: 0; font: inherit; font-size: 0.9rem; padding: 6px 8px; border-radius: 10px; border: 1px solid var(--linie); background: var(--flaeche); color: var(--text); }
+.etappen-nr span {
+  display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  color: #fff; font-size: 0.7rem; font-weight: 700; border: 2px solid #fff; box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+}
+.etappen-nr { background: none; border: 0; }
+.popup-tour { display: block; margin-top: 4px; text-align: left; }
