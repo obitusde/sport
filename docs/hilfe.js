@@ -1,6 +1,6 @@
 /**
  * hilfe.js – Erklär-Seite „So funktioniert die App“
- * Version: 0.9.0 (2026-11-18)
+ * Version: 0.10.0 (2026-11-18)
  *
  * Erreichbar über das „?“ in „Form“ und „Erfolge“ sowie über die Einstellungen.
  * Werte wie Ziele und Grenzen werden aus app.js gelesen, damit der Text stimmt,
@@ -47,7 +47,14 @@ function ansichtHilfe() {
     ${abschnitt('Serien und Abzeichen', `
       <p>Eine <b>Serie</b> zählt, wie viele Wochen hintereinander du ein Ziel erreicht hast. Die laufende Woche bricht die Serie nicht, solange sie noch nicht vorbei ist. Sobald du das Ziel erreichst, zählt sie mit.</p>
       <p><b>Serien-Abzeichen</b> gibt es für 4, 12, 26 und 52 Wochen in Folge. Rückwirkend gilt dein aktuelles Ziel.</p>
-      <p><b>Jahres-Abzeichen</b> gibt es für Kilometer im laufenden Kalenderjahr: Laufen und Wandern 100, 250, 500, 1000 km, Rad 1000, 2500, 5000, 10000 km. Jedes Jahr beginnt bei null.</p>
+      <p><b>Jahres-Abzeichen</b> messen dich an deinen eigenen Vorjahren (Kilometer, bei Ski Skitage, jedes Jahr beginnt bei null):</p>
+      <ul>
+        <li><b>Bronze:</b> halb so viel wie in einem normalen Jahr (50 % deines Schnitts der letzten 3 Jahre)</li>
+        <li><b>Silber:</b> ein normales Jahr (dein Schnitt der letzten 3 Jahre)</li>
+        <li><b>Gold:</b> mehr als sonst (dein bestes der letzten 3 Jahre, mindestens 15 % über dem Schnitt)</li>
+        <li><b>Rekord:</b> dein bestes Jahr überhaupt (nur wenn es höher liegt als Gold)</li>
+      </ul>
+      <p>Die <b>Hochrechnung</b> nimmt deinen Stand von heute und rechnet dazu, was in den letzten 3 Jahren im Schnitt von heute bis Silvester noch dazukam. So zählt die Saison mit: Skitage kommen im Winter, Wanderungen eher im Sommer. Ohne Vorjahre gelten feste Einstiegswerte.</p>
       <p><b>Allrounder:</b> eine Woche mit mindestens 3 verschiedenen Sportarten.</p>`)}
 
     ${abschnitt('Form: relative Werte', `
@@ -64,7 +71,7 @@ function ansichtHilfe() {
 
     ${abschnitt('Bestzeiten und Bestmarken', `
       <p><b>Bestzeiten</b> (1 km, 5 km, 10 km) kommen aus Garmins schnellsten Abschnitten eines Laufs. Hat Garmin keinen, nimmt die App die Durchschnitts-Pace eines Laufs, der mindestens so lang war („Ø des ganzen Laufs“). Laufband zählt hier nicht.</p>
-      <p><b>Bestmarken</b>: längster Lauf, längste Radtour, längste Wanderung, meiste Höhenmeter an einem Tag, meiste Sportpunkte in einer Woche.</p>`)}
+      <p><b>Bestmarken</b>: längster Lauf, längste Radtour, längste Wanderung, meiste Höhenmeter an einem Tag, meiste Sportpunkte in einer Woche. Bei den Höhenmetern zählt Pistenski nicht mit, weil Garmin dort die Liftfahrten mitrechnet; Skitouren zählen.</p>`)}
 
     ${abschnitt('Unrealistische Aktivitäten', `
       <p>Manchmal läuft die Aufzeichnung im Auto oder Zug weiter. Solche Aktivitäten erkennt die App an diesen Grenzen:</p>
@@ -82,9 +89,15 @@ function ansichtHilfe() {
       <p>In der Wochenansicht siehst du die Schritte pro Tag und den Wochenschnitt im Vergleich zu den 90 Tagen davor; unter „Form“ die letzten 28 Tage im Vergleich zu deinem Schnitt (ab 3 Wochen Daten). Schritte zählen nicht als Sportpunkte.</p>`)}
 
     ${abschnitt('Karte', `
-      <p>Die Karte zeigt alle aufgezeichneten Spuren von Wanderungen, Radfahrten, Skitagen und (zuschaltbar) Läufen. Wo du oft warst, überlagern sich die Linien und werden kräftiger – eine Heatmap deiner Wege.</p>
+      <p>Die Karte zeigt alle aufgezeichneten Spuren von Wanderungen, Radfahrten, Skitagen und (zuschaltbar) Läufen als <b>Heatmap</b>: Je öfter du eine Strecke gegangen oder gefahren bist, desto dicker die Linie (1×, 2–4×, 5× und öfter). Die App legt dafür ein Raster von etwa 25 m über die Karte und zählt, wie viele verschiedene Aktivitäten durch jedes Feld gehen. Antippen zeigt alle Aktivitäten an dieser Stelle.</p>
+      <p><b>Zug und GPS-Sprünge:</b> Teile einer Spur, in denen du für die Sportart unrealistisch schnell warst (über eine Minute gemessen, z. B. Wandern schneller als 15 km/h), schneidet die App heraus. Ebenso Sprünge und Lücken, etwa wenn die Uhr im Zug pausiert war. Dort ist die Linie unterbrochen statt quer über die Landschaft gezogen. In der Detailansicht steht, wie viele Kilometer ausgeblendet sind.</p>
+      <p>Das Symbol mit den vier Ecken öffnet die Karte im <b>Vollbild</b>; die Zurück-Taste schließt es.</p>
       <p>Über das Symbol oben rechts in der Karte blendest du die <b>offiziellen Wanderwege der Schweiz</b> (swisstopo) ein: So siehst du, wo es Wege gibt, auf denen du noch nicht warst. Als Grundkarte gibt es die Landeskarte von swisstopo oder OpenStreetMap.</p>
       <p>Die Spuren kommen aus den Originaldateien der Uhr. Beim ersten Mal lädt die App die ganze Historie im Hintergrund nach; das kann ein paar Stunden dauern. Unrealistische Aktivitäten (z. B. Autofahrt mit laufender Aufzeichnung) erscheinen nicht.</p>`)}
+
+    ${abschnitt('Mit Garmin abgleichen', `
+      <p>Die App übernimmt neue Aktivitäten von Garmin automatisch, spätere Änderungen aber nicht. Hast du bei Garmin eine Aktivität geändert (z. B. Sportart, Name, gekürzt) oder gelöscht, gehe zu Einstellungen → „Mit Garmin abgleichen“.</p>
+      <p>Wähle den Zeitraum, in dem die Aktivität <b>stattfand</b>, und tippe auf „Prüfen“. Die App zeigt, was sich unterscheidet, ändert aber noch nichts. Erst mit „Übernehmen“ werden Änderungen ersetzt, gelöschte Aktivitäten entfernt und fehlende ergänzt. Hat sich die Strecke geändert, wird auch die Spur neu geladen. Der Abgleich läuft nie automatisch.</p>`)}
 
     ${abschnitt('Werte in der Detailansicht', `
       <p><b>Pulszonen:</b> wie lange du in welchem Pulsbereich warst, von Zone 1 (Aufwärmen) bis Zone 5 (Maximum).</p>

@@ -1,6 +1,6 @@
 /**
  * Spuren.gs – GPS-Spuren für die Karte (Heatmap) und die Detailansicht
- * Version: 0.9.0 (2026-11-18)
+ * Version: 0.10.0 (2026-11-18)
  *
  * Quelle: Originaldatei der Aktivität (ZIP mit FIT), Garmin-Endpunkt
  * /download-service/files/activity/{id} mit „Accept: *\/*“ (siehe Diagnose 0.1.1).
@@ -20,10 +20,34 @@
  * sammeln() lädt Spuren neuer Aktivitäten automatisch mit.
  *
  * Aktionen der Web-App: spuren (alle grob), spur (id, fein).
+ *
+ * Änderungen 0.10.0: Filter für Zugfahrten und GPS-Sprünge (spurFiltern_). Die FIT-Punkte
+ *   tragen jetzt ihren Zeitstempel (Feld 253, auch kompakte Zeitstempel). Teile mit
+ *   unrealistischem Tempo (über 60 Sekunden gemessen) und Sprünge werden herausgeschnitten,
+ *   die Spur besteht dann aus mehreren Teilen. Mehrere Polylines sind durch ein Leerzeichen
+ *   getrennt (kommt in Polylines nie vor). Neue Spalten „version“ und „entfernt_km“:
+ *   Spuren mit älterer Version gelten als offen und werden vom Zeitgeber neu berechnet.
+ *   Neue Diagnose: diagnoseSpurFilter() lädt die neuesten Spuren und loggt nur, was der
+ *   Filter entfernen würde.
  */
 
 const BLATT_SPUREN = 'Spuren';
-const SPUREN_SPALTEN = ['activityId', 'sportart', 'start', 'status', 'punkte', 'grob', 'fein', 'bearbeitet'];
+const SPUREN_SPALTEN = ['activityId', 'sportart', 'start', 'status', 'punkte', 'grob', 'fein', 'bearbeitet', 'version', 'entfernt_km'];
+/** Version der Spur-Berechnung. Ältere Einträge werden neu berechnet. */
+const SPUR_VERSION = 2;
+/**
+ * Filter je Sportart: kmh = höchstes Tempo über 60 Sekunden (null = kein Tempofilter, Ski
+ * hat Lifte und schnelle Abfahrten), luecke = größter Abstand zweier Punkte in Metern,
+ * sprung = Tempo zwischen zwei Punkten, ab dem ein Punkt als GPS-Sprung gilt.
+ */
+const SPUR_FILTER = {
+  wandern: { kmh: 15, luecke: 400, sprung: 100 },
+  laufen: { kmh: 30, luecke: 400, sprung: 100 },
+  rad: { kmh: 80, luecke: 1000, sprung: 160 },
+  ski: { kmh: null, luecke: 1500, sprung: 200 }
+};
+const SPUR_FENSTER_S = 60;
+const SPUR_MIN_TEIL_M = 150;
 const SPUREN_SPORTARTEN = ['wandern', 'rad', 'ski', 'laufen'];
 const SPUR_TOLERANZ_GROB = 30;
 const SPUR_TOLERANZ_FEIN = 5;
@@ -40,10 +64,38 @@ function diagnoseSpuren() {
   log_('Offene Aktivitäten mit GPS: ' + spurKandidaten_().length);
   kandidaten.forEach(function (k) {
     const t0 = Date.now();
-    const s = spurLaden_(k.id);
+    const s = spurLaden_(k.id, k.sportart);
     log_(k.sportart + ': Status ' + s.status + ', Punkte ' + s.punkte + ', grob ' + (s.grob || '').length +
       ' Zeichen, fein ' + (s.fein || '').length + ' Zeichen, ' + (Date.now() - t0) + ' ms');
   });
+}
+
+/**
+ * Diagnose: lädt die neuesten Spuren (Standard 40), wendet den Filter an und loggt nur
+ * Zählungen und entfernte Kilometer, keine Orte oder Koordinaten. Speichert nichts.
+ */
+function diagnoseSpurFilter(anzahl) {
+  anzahl = anzahl || 40;
+  log_('===== Diagnose Spur-Filter (neueste ' + anzahl + ') =====');
+  const kandidaten = spurKandidaten_().slice(0, anzahl);
+  let mitSchnitt = 0;
+  let ohneZeit = 0;
+  kandidaten.forEach(function (k, n) {
+    const s = spurLaden_(k.id, k.sportart);
+    if (s.status !== 'ok') {
+      log_((n + 1) + '. ' + k.sportart + ': Status ' + s.status);
+      return;
+    }
+    if (!s.mitZeit) ohneZeit++;
+    if (s.entferntKm > 0 || s.teile > 1) {
+      mitSchnitt++;
+      log_((n + 1) + '. ' + k.sportart + ': ' + s.teile + ' Teil(e), entfernt ' + runden_(s.entferntKm, 1) +
+        ' km (zu schnell ' + runden_(s.schnellKm, 1) + ' km, Sprünge/Lücken ' + s.spruenge + ')' +
+        (s.mitZeit ? '' : ', ohne Zeitstempel'));
+    }
+    Utilities.sleep(150);
+  });
+  log_('Geprüft: ' + kandidaten.length + ', davon mit Schnitt: ' + mitSchnitt + ', ohne Zeitstempel: ' + ohneZeit);
 }
 
 /** Lädt fehlende Spuren, solange Zeit bleibt. Liefert {verarbeitet, offen}. */
@@ -58,14 +110,20 @@ function spurenNachladen(sekunden, maxAnzahl) {
   for (let i = 0; i < kandidaten.length; i++) {
     if (Date.now() - t0 > budget || (maxAnzahl && verarbeitet >= maxAnzahl)) break;
     const k = kandidaten[i];
-    const s = spurLaden_(k.id);
+    const s = spurLaden_(k.id, k.sportart);
     if (s.status === 'fehler 429') {
       abbruch = 'Ratenlimit von Garmin erreicht';
       break;
     }
-    puffer.push([k.id, k.sportart, k.start, s.status, s.punkte, s.grob, s.fein, new Date()]);
+    const werte = [k.id, k.sportart, k.start, s.status, s.punkte, s.grob, s.fein, new Date(), SPUR_VERSION,
+      s.status === 'ok' ? runden_(s.entferntKm, 2) : ''];
+    if (k.zeile) {
+      b.getRange(k.zeile, 1, 1, SPUREN_SPALTEN.length).setValues([werte]); // ältere Version ersetzen
+    } else {
+      puffer.push(werte);
+      if (puffer.length >= 20) spurenSchreiben_(b, puffer);
+    }
     verarbeitet++;
-    if (puffer.length >= 20) spurenSchreiben_(b, puffer);
     Utilities.sleep(150);
   }
   spurenSchreiben_(b, puffer);
@@ -126,8 +184,11 @@ function spurFein_(id) {
   if (!b || b.getLastRow() < 2) return { fein: null };
   const treffer = b.getRange(2, 1, b.getLastRow() - 1, 1).createTextFinder(String(id)).matchEntireCell(true).findNext();
   if (!treffer) return { fein: null };
-  const z = b.getRange(treffer.getRow(), 1, 1, 7).getValues()[0];
-  return { fein: z[3] === 'ok' ? (z[6] || z[5]) : null, status: z[3] };
+  const z = b.getRange(treffer.getRow(), 1, 1, SPUREN_SPALTEN.length).getValues()[0];
+  return {
+    fein: z[3] === 'ok' ? (z[6] || z[5]) : null, status: z[3],
+    entferntKm: typeof z[9] === 'number' ? z[9] : null
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -141,6 +202,9 @@ function spurenBlatt_() {
     b = ss.insertSheet(BLATT_SPUREN);
     b.getRange(1, 1, 1, SPUREN_SPALTEN.length).setValues([SPUREN_SPALTEN]).setFontWeight('bold');
     b.setFrozenRows(1);
+  } else if (b.getRange(1, 1, 1, SPUREN_SPALTEN.length).getValues()[0].join('|') !== SPUREN_SPALTEN.join('|')) {
+    // Neue Spalten (ab 0.10.0) in der Kopfzeile ergänzen
+    b.getRange(1, 1, 1, SPUREN_SPALTEN.length).setValues([SPUREN_SPALTEN]).setFontWeight('bold');
   }
   return b;
 }
@@ -152,35 +216,51 @@ function spurenSchreiben_(b, puffer) {
   puffer.length = 0;
 }
 
-/** Aktivitäten mit GPS in SPUREN_SPORTARTEN ohne Eintrag im Blatt „Spuren“, neueste zuerst. */
+/**
+ * Aktivitäten mit GPS in SPUREN_SPORTARTEN ohne aktuelle Spur, neueste zuerst. Hat eine
+ * Aktivität schon eine Spur älterer Version, steht deren Zeilennummer in „zeile“.
+ */
 function spurKandidaten_() {
   const akt = tabelle_().getSheetByName(BLATT_AKTIVITAETEN);
   if (!akt || akt.getLastRow() < 2) return [];
   const vorhanden = {};
   const b = tabelle_().getSheetByName(BLATT_SPUREN);
   if (b && b.getLastRow() >= 2) {
-    b.getRange(2, 1, b.getLastRow() - 1, 1).getValues().forEach(function (z) { vorhanden[String(z[0])] = true; });
+    const breite = Math.min(b.getLastColumn(), SPUREN_SPALTEN.length);
+    b.getRange(2, 1, b.getLastRow() - 1, breite).getValues().forEach(function (z, n) {
+      vorhanden[String(z[0])] = { zeile: n + 2, aktuell: Number(z[8]) === SPUR_VERSION };
+    });
   }
   const i = {};
   SPALTEN.forEach(function (n, k) { i[n] = k; });
   return akt.getRange(2, 1, akt.getLastRow() - 1, SPALTEN.length).getValues()
     .filter(function (z) {
-      return z[i.hat_gps] === true && SPUREN_SPORTARTEN.indexOf(z[i.sportart]) >= 0 && !vorhanden[String(z[i.activityId])] &&
+      const v = vorhanden[String(z[i.activityId])];
+      return z[i.hat_gps] === true && SPUREN_SPORTARTEN.indexOf(z[i.sportart]) >= 0 && !(v && v.aktuell) &&
         meldungPlausibel_({ sportart: z[i.sportart], km: Number(z[i.distanz_km]) || 0, min: Number(z[i.dauer_min]) || 0 });
     })
-    .map(function (z) { return { id: String(z[i.activityId]), sportart: z[i.sportart], start: z[i.start] }; })
+    .map(function (z) {
+      const v = vorhanden[String(z[i.activityId])];
+      return { id: String(z[i.activityId]), sportart: z[i.sportart], start: z[i.start], zeile: v ? v.zeile : null };
+    })
     .sort(function (x, y) { return (y.start instanceof Date ? y.start.getTime() : 0) - (x.start instanceof Date ? x.start.getTime() : 0); });
 }
 
-/** Lädt die FIT-Datei und liefert {status, punkte, grob, fein}. */
-function spurLaden_(id) {
+/**
+ * Lädt die FIT-Datei, filtert Zugfahrten und Sprünge und liefert
+ * {status, punkte, grob, fein, teile, entferntKm, schnellKm, spruenge, mitZeit}.
+ */
+function spurLaden_(id, sportart) {
+  const leer = function (status, punkte) {
+    return { status: status, punkte: punkte || 0, grob: '', fein: '', teile: 0, entferntKm: 0, schnellKm: 0, spruenge: 0, mitZeit: false };
+  };
   let antwort;
   try {
     antwort = garminAbruf_(PFAD_DATEI + id, null, { accept: '*/*', leise: true });
   } catch (e) {
-    return { status: 'fehler netz', punkte: 0, grob: '', fein: '' };
+    return leer('fehler netz');
   }
-  if (antwort.getResponseCode() !== 200) return { status: 'fehler ' + antwort.getResponseCode(), punkte: 0, grob: '', fein: '' };
+  if (antwort.getResponseCode() !== 200) return leer('fehler ' + antwort.getResponseCode());
   let dateien;
   try {
     const blob = antwort.getBlob().setContentType('application/zip');
@@ -199,19 +279,127 @@ function spurLaden_(id) {
       }
     }
   });
-  if (punkte.length < 2) return { status: 'keine', punkte: punkte.length, grob: '', fein: '' };
-  const grob = polylineKodieren_(vereinfachen_(punkte, SPUR_TOLERANZ_GROB));
+  if (punkte.length < 2) return leer('keine', punkte.length);
+  const f = spurFiltern_(punkte, sportart);
+  const ergebnis = {
+    status: 'ok', punkte: punkte.length, grob: '', fein: '', teile: f.teile.length,
+    entferntKm: f.entferntM / 1000, schnellKm: f.schnellM / 1000, spruenge: f.spruenge, mitZeit: f.mitZeit
+  };
+  if (!f.teile.length) {
+    ergebnis.status = 'keine';
+    return ergebnis;
+  }
+  const kodieren = function (toleranz) {
+    return f.teile.map(function (t) { return polylineKodieren_(vereinfachen_(t, toleranz)); }).join(' ');
+  };
+  ergebnis.grob = kodieren(SPUR_TOLERANZ_GROB);
   let toleranz = SPUR_TOLERANZ_FEIN;
-  let fein = polylineKodieren_(vereinfachen_(punkte, toleranz));
+  let fein = kodieren(toleranz);
   while (fein.length > SPUR_MAX_ZEICHEN && toleranz < 200) {
     toleranz *= 2;
-    fein = polylineKodieren_(vereinfachen_(punkte, toleranz));
+    fein = kodieren(toleranz);
   }
-  return { status: 'ok', punkte: punkte.length, grob: grob, fein: fein.length > SPUR_MAX_ZEICHEN ? '' : fein };
+  ergebnis.fein = fein.length > SPUR_MAX_ZEICHEN ? '' : fein;
+  return ergebnis;
+}
+
+/** Abstand in Metern (lokal eben, genügt für kurze Strecken). */
+function spurAbstand_(p, q) {
+  const breite = (p[0] + q[0]) / 2 * Math.PI / 180;
+  const dx = (q[1] - p[1]) * 111320 * Math.cos(breite);
+  const dy = (q[0] - p[0]) * 110540;
+  return Math.sqrt(dx * dx + dy * dy);
 }
 
 /**
- * Liest alle GPS-Punkte [lat, lon] aus den record-Nachrichten (global 20) einer FIT-Datei.
+ * Entfernt aus einer Spur [[lat, lon, sekunden|null], …]:
+ * 1. Sprünge und Lücken: Abstand zum Vorgänger größer als „luecke“ oder über 50 m mit
+ *    einem Tempo über „sprung“ km/h. Dort wird die Linie unterbrochen (keine gerade Linie
+ *    über die Lücke, z. B. nach einer Pause im Zug); ein einzelner Ausreißer bleibt als
+ *    kurzes Stück übrig und fällt in Schritt 3 weg.
+ * 2. Zu schnelle Abschnitte: Luftlinie über mindestens SPUR_FENSTER_S Sekunden schneller
+ *    als „kmh“ (Zug, Bus, Auto). Die Punkte dieses Zeitfensters fallen weg.
+ * 3. Teile kürzer als SPUR_MIN_TEIL_M (Reste am Bahnhof, Ausreißer).
+ * @return {{teile: Array, entferntM: number, schnellM: number, spruenge: number, mitZeit: boolean}}
+ */
+function spurFiltern_(punkte, sportart) {
+  const g = SPUR_FILTER[sportart] || SPUR_FILTER.wandern;
+  const mitZeit = punkte.filter(function (p) { return p[2] !== null && p[2] !== undefined; }).length > punkte.length * 0.9;
+  let gesamtM = 0;
+  for (let i = 1; i < punkte.length; i++) gesamtM += spurAbstand_(punkte[i - 1], punkte[i]);
+
+  // 1. Sprünge und Lücken
+  let spruenge = 0;
+  let stuecke = [];
+  let aktuell = [punkte[0]];
+  for (let i = 1; i < punkte.length; i++) {
+    const p = punkte[i - 1];
+    const q = punkte[i];
+    const d = spurAbstand_(p, q);
+    const dt = mitZeit && p[2] !== null && q[2] !== null ? q[2] - p[2] : null;
+    const sprung = d > g.luecke || (d > 50 && dt !== null && (dt <= 0 || d / dt * 3.6 > g.sprung));
+    if (sprung) {
+      spruenge++;
+      stuecke.push(aktuell);
+      aktuell = [];
+    }
+    aktuell.push(q);
+  }
+  stuecke.push(aktuell);
+
+  // 2. Zu schnelle Abschnitte
+  let schnellM = 0;
+  if (mitZeit && g.kmh) {
+    const grenzeMs = g.kmh / 3.6;
+    const neu = [];
+    stuecke.forEach(function (st) {
+      const n = st.length;
+      const markierung = new Int32Array(n + 1);
+      let j = 0;
+      for (let i = 0; i < n; i++) {
+        if (j < i) j = i;
+        while (j < n - 1 && st[j][2] - st[i][2] < SPUR_FENSTER_S) j++;
+        const dt = st[j][2] - st[i][2];
+        if (dt >= SPUR_FENSTER_S && spurAbstand_(st[i], st[j]) / dt > grenzeMs) {
+          markierung[i]++;
+          markierung[j + 1]--;
+        }
+      }
+      let zaehler = 0;
+      let teil = [];
+      for (let i = 0; i < n; i++) {
+        zaehler += markierung[i];
+        if (zaehler > 0) {
+          if (i > 0) schnellM += spurAbstand_(st[i - 1], st[i]);
+          if (teil.length) neu.push(teil);
+          teil = [];
+        } else {
+          teil.push(st[i]);
+        }
+      }
+      if (teil.length) neu.push(teil);
+    });
+    stuecke = neu;
+  }
+
+  // 3. Kurze Reste weglassen
+  const teile = [];
+  let behaltenM = 0;
+  stuecke.forEach(function (st) {
+    let laenge = 0;
+    for (let i = 1; i < st.length; i++) laenge += spurAbstand_(st[i - 1], st[i]);
+    if (st.length >= 2 && laenge >= SPUR_MIN_TEIL_M) {
+      behaltenM += laenge;
+      teile.push(st.map(function (p) { return [p[0], p[1]]; }));
+    }
+  });
+  return { teile: teile, entferntM: Math.max(0, gesamtM - behaltenM), schnellM: schnellM, spruenge: spruenge, mitZeit: mitZeit };
+}
+
+/**
+ * Liest alle GPS-Punkte [lat, lon, sekunden] aus den record-Nachrichten (global 20) einer
+ * FIT-Datei. Sekunden = FIT-Zeitstempel (Feld 253) oder null. Kompakte Zeitstempel-Köpfe
+ * (Bit 7) tragen 5 Bit Versatz zum letzten vollen Zeitstempel (FIT-Protokoll).
  * Gleicher Aufbau wie fitScannen_ in Diagnose.gs.
  */
 function fitPunkte_(rohBytes) {
@@ -223,16 +411,28 @@ function fitPunkte_(rohBytes) {
   const defs = {};
   const punkte = [];
   const faktor = 180 / 2147483648;
+  let letzteZeit = null;
   const int32 = function (p, little) {
     return little ? (b[p] | (b[p + 1] << 8) | (b[p + 2] << 16) | (b[p + 3] << 24))
       : ((b[p] << 24) | (b[p + 1] << 16) | (b[p + 2] << 8) | b[p + 3]);
   };
-  const daten = function (pos, def) {
+  const uint32 = function (p, little) { return int32(p, little) >>> 0; };
+  const daten = function (pos, def, kompaktZeit) {
     if (!def) throw new Error('Datennachricht ohne Definition');
+    let zeit = kompaktZeit;
+    if (def.zeit >= 0) {
+      const z = uint32(pos + def.zeit, def.little);
+      if (z !== 0xffffffff) {
+        letzteZeit = z;
+        zeit = z;
+      }
+    }
     if (def.global === 20 && def.lat >= 0 && def.lon >= 0) {
       const la = int32(pos + def.lat, def.little);
       const lo = int32(pos + def.lon, def.little);
-      if (la !== 0x7fffffff && lo !== 0x7fffffff && (la !== 0 || lo !== 0)) punkte.push([la * faktor, lo * faktor]);
+      if (la !== 0x7fffffff && lo !== 0x7fffffff && (la !== 0 || lo !== 0)) {
+        punkte.push([la * faktor, lo * faktor, zeit === undefined ? null : zeit]);
+      }
     }
     return pos + def.groesse;
   };
@@ -240,7 +440,15 @@ function fitPunkte_(rohBytes) {
   while (pos < ende) {
     const kopf = b[pos++];
     if (kopf & 0x80) {
-      pos = daten(pos, defs[(kopf >> 5) & 0x03]);
+      let zeit;
+      if (letzteZeit !== null) {
+        const versatz = kopf & 0x1f;
+        zeit = (letzteZeit & ~0x1f) + versatz;
+        if (versatz < (letzteZeit & 0x1f)) zeit += 0x20;
+        zeit = zeit >>> 0;
+        letzteZeit = zeit;
+      }
+      pos = daten(pos, defs[(kopf >> 5) & 0x03], zeit);
       continue;
     }
     const lokal = kopf & 0x0f;
@@ -249,10 +457,11 @@ function fitPunkte_(rohBytes) {
       const global = little ? b[pos + 2] + b[pos + 3] * 256 : b[pos + 2] * 256 + b[pos + 3];
       const anzahl = b[pos + 4];
       pos += 5;
-      const def = { global: global, little: little, groesse: 0, lat: -1, lon: -1 };
+      const def = { global: global, little: little, groesse: 0, lat: -1, lon: -1, zeit: -1 };
       for (let i = 0; i < anzahl; i++) {
         if (b[pos] === 0 && b[pos + 1] === 4) def.lat = def.groesse;
         if (b[pos] === 1 && b[pos + 1] === 4) def.lon = def.groesse;
+        if (b[pos] === 253 && b[pos + 1] === 4) def.zeit = def.groesse;
         def.groesse += b[pos + 1];
         pos += 3;
       }

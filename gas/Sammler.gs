@@ -1,6 +1,6 @@
 /**
  * Sammler.gs – Aktivitäten von Garmin ins Sheet „Aktivitaeten" übernehmen
- * Version: 0.9.0 (2026-11-18)
+ * Version: 0.10.0 (2026-11-18)
  *
  * Funktionen zum Ausführen im Script-Editor:
  * - sammelnTrockenlauf()  Diagnose: holt die Daten, schreibt nichts, loggt nur Zählungen
@@ -31,9 +31,9 @@
  * die ID in der Script Property SHEET_ID. Ein bestehendes Sheet kann genutzt werden,
  * indem man SHEET_ID vorher von Hand setzt.
  *
- * Noch nicht enthalten: GPS-Spuren (spur_datei bleibt leer), bis die FIT-Diagnose
- * geklärt hat, wie die Spur gelesen wird. Nachträgliche Änderungen in Garmin
- * (z. B. geänderter Typ) werden nicht übernommen.
+ * Die Spalte spur_datei bleibt leer: GPS-Spuren stehen seit 0.9.0 im Blatt „Spuren“ (Spuren.gs).
+ * Nachträgliche Änderungen in Garmin (z. B. geänderter Typ, gelöschte Aktivität) übernimmt
+ * sammeln() nicht; dafür gibt es ab 0.10.0 den Abgleich auf Knopfdruck (Abgleich.gs).
  */
 
 const SHEET_NAME = 'Sport-Daten';
@@ -148,7 +148,7 @@ function sammelnIntern_(trocken, optionen) {
   const t0 = Date.now();
 
   try {
-    log_('===== Sammler v0.9.0 ' + (trocken ? 'TROCKENLAUF (schreibt nichts)' : 'gestartet') + ' =====');
+    log_('===== Sammler v0.10.0 ' + (trocken ? 'TROCKENLAUF (schreibt nichts)' : 'gestartet') + ' =====');
     const blatt = trocken ? blattOhneAnlegen_() : blatt_();
     const bekannt = bekannteIds_(blatt);
     const voll = bekannt.size === 0;

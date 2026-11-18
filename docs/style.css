@@ -1,4 +1,4 @@
-/* style.css – Sport-App, Version 0.9.0 (2026-11-18) */
+/* style.css – Sport-App, Version 0.10.0 (2026-11-18) */
 
 :root {
   --hintergrund: #f6f5f2;
@@ -292,8 +292,13 @@ button.bestmarke { cursor: pointer; }
 .jb-wert small { display: block; font-weight: 400; font-size: 0.7rem; color: var(--text-2); }
 
 /* Jahres-Abzeichen */
-.stufen { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
-.stufe { font-size: 0.7rem; font-weight: 700; border-radius: 6px; padding: 1px 6px; border: 1px dashed var(--linie); color: var(--text-2); background: none; margin: 0; }
+.stufen { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.stufe {
+  display: inline-flex; flex-direction: column; align-items: center; min-width: 58px;
+  font-size: 0.85rem; font-weight: 700; border-radius: 8px; padding: 3px 8px;
+  border: 1px dashed var(--linie); color: var(--text-2); background: none; margin: 0; font-variant-numeric: tabular-nums;
+}
+.stufe small { font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
 .stufe.an { border: 1px solid var(--farbe); background: var(--farbe); color: #fff; }
 
 /* Benachrichtigungen (Android-App) */
@@ -313,10 +318,30 @@ a.knopf { text-decoration: none; }
 }
 .chip.an { background: var(--farbe); color: #fff; }
 .filter-reihe select { font: inherit; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--linie); background: var(--flaeche); color: var(--text); }
-.karte-flaeche { height: 62vh; min-height: 320px; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--linie); background: var(--flaeche-2); }
+.karte-flaeche { height: 62vh; min-height: 320px; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--linie); background: #fff; }
 .karte-info { margin: 10px 0 0; }
-.karte-detail-rahmen { padding: 0; overflow: hidden; }
-.detail-karte { height: 260px; }
+.karte-detail-rahmen { padding: 0; overflow: hidden; margin: 0 0 12px; }
+.detail-karte { height: 55vh; min-height: 300px; background: #fff; }
+.detail-karte-hinweis { margin: -6px 2px 12px; }
+.detail-karte-hinweis:empty { display: none; }
+/* Vollbild für Karten */
+.vollbild {
+  position: fixed !important; inset: 0; z-index: 2000;
+  height: auto !important; min-height: 0; border: 0; border-radius: 0;
+}
+body.vollbild-aktiv { overflow: hidden; }
+.vollbild-knopf { display: grid !important; place-items: center; }
+.vollbild-knopf svg { width: 18px; height: 18px; fill: none; stroke: #333; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.legende-linien { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0 4px; font-size: 0.8rem; color: var(--text-2); }
+.legende-linien span { display: inline-flex; align-items: center; gap: 6px; }
+.legende-linien i { display: inline-block; width: 22px; border-radius: 4px; background: var(--text-2); }
+.popup-liste { list-style: none; margin: 6px 0 0; padding: 0; max-height: 260px; overflow-y: auto; }
+.popup-liste li { padding: 6px 0; border-top: 1px solid #e5e5e5; }
+.popup-liste li:first-child { border-top: 0; }
+.popup-liste .popup-knopf { display: block; margin-top: 4px; }
+/* Popups sind immer hell (Leaflet), auch im dunklen Modus lesbar halten */
+.leaflet-popup-content .leise { color: #5c5f66; }
+.leaflet-popup-content .knopf { background: #efede8; color: #1d1e21; border-color: #e2dfd8; }
 .leer-karte { display: grid; place-items: center; }
 .leaflet-container { font: inherit; }
 .popup-knopf { margin-top: 8px; }
@@ -430,8 +455,30 @@ a.knopf { text-decoration: none; }
 .knopf:disabled { opacity: 0.5; cursor: default; }
 .knopfreihe { display: flex; gap: 8px; flex-wrap: wrap; }
 
-.zaehler { display: flex; align-items: center; gap: 16px; }
-.zaehler-wert { font-size: 1.8rem; font-weight: 700; min-width: 2ch; text-align: center; }
+/* Zähler: Text links, „− Wert +“ rechts mit fester Breite */
+.zaehler { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; }
+.zaehler + .zaehler { border-top: 1px solid var(--linie); }
+.zaehler-karte .zaehler:first-child { padding-top: 0; }
+.zaehler-karte .zaehler:last-child { padding-bottom: 0; }
+.zaehler-text { min-width: 0; }
+.zaehler-text b { display: block; font-weight: 600; }
+.zaehler-text small { display: block; font-size: 0.8rem; color: var(--text-2); margin-top: 2px; }
+.zaehler-steuer { display: flex; align-items: center; gap: 4px; flex: none; }
+.zaehler-wert { font-size: 1.25rem; font-weight: 700; width: 4.2em; text-align: center; font-variant-numeric: tabular-nums; }
+@media (max-width: 360px) {
+  .zaehler { flex-direction: column; align-items: flex-start; }
+}
+/* Abgleich mit Garmin */
+.datum-reihe { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.datum-reihe .feld { margin-bottom: 12px; }
+.datum-reihe input { width: 100%; min-width: 0; }
+.abgleich-liste { list-style: none; margin: 12px 0 0; padding: 0; }
+.abgleich-liste li { padding: 10px 0 10px 12px; border-top: 1px solid var(--linie); border-left: 3px solid var(--farbe); margin-top: -1px; }
+.abgleich-liste b { display: block; }
+.abgleich-liste small { display: block; color: var(--text-2); font-size: 0.8rem; margin-top: 2px; }
+.abgleich-art { display: block; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-2); }
+.abgleich-geloescht .abgleich-art { color: var(--fehler); }
+.abgleich-neu .abgleich-art { color: var(--gut); }
 
 .tabelle { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 .tabelle td { padding: 6px 0; border-bottom: 1px solid var(--linie); vertical-align: top; }

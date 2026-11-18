@@ -1,6 +1,6 @@
 /**
  * WebApp.gs – Schnittstelle für die App (JSON)
- * Version: 0.9.0 (2026-11-18)
+ * Version: 0.10.0 (2026-11-18)
  *
  * Aufruf: GET <webapp-url>?token=<WEBAPP_TOKEN>&aktion=<aktion>&...
  *
@@ -16,7 +16,8 @@
  * | schritteSetzen    | Schritte pro Tag vom Handy speichern (daten), siehe Schritte.gs  |
  * | schritte          | alle Tage: {tage: [[datum, schritte, alltag, punkte, unplausibel]]} |
  * | spuren            | alle groben Spuren für die Karte: {spuren: [[id, sportart, datum, polyline]], offen} |
- * | spur              | feine Spur einer Aktivität (id): {fein}                         |
+ * | spur              | feine Spur einer Aktivität (id): {fein, entferntKm}             |
+ * | abgleich          | Zeitraum mit Garmin vergleichen (von, bis, uebernehmen=1), siehe Abgleich.gs |
  *
  * Jede Antwort ist JSON: {ok: true, version, …} oder {ok: false, fehler}.
  * Ohne gültiges Token liefert die Web-App keine Daten.
@@ -43,9 +44,11 @@
  * Änderungen 0.9.0: POST (doPost) mit JSON-Rumpf für größere Daten (Schrittabschnitte);
  *   Einstellungen alltagPunkte, alltagFrei, alltagProPunkt; Aktionen „spuren“ und „spur“;
  *   „sammeln“ lädt auch die Spuren neuer Aktivitäten (höchstens 20 Sekunden).
+ * Änderungen 0.10.0: Aktion „abgleich“ (Abgleich.gs); „spur“ liefert entferntKm (Kilometer,
+ *   die der Spur-Filter als Zugfahrt oder GPS-Sprung entfernt hat).
  */
 
-const WEBAPP_VERSION = '0.9.0';
+const WEBAPP_VERSION = '0.10.0';
 const PUNKTE_AB_JAHR = 2023;
 const BLATT_KONFIGURATION = 'Konfiguration';
 
@@ -213,6 +216,8 @@ function aktionAusfuehren_(p) {
       return Object.assign(basis, { meldung: meldung_(p) });
     case 'details':
       return Object.assign(basis, { id: String(p.id), details: detailsLesen_(p.id) });
+    case 'abgleich':
+      return Object.assign(basis, abgleich_(p.von, p.bis, String(p.uebernehmen) === '1'));
     case 'sammeln': {
       const e = sammelnIntern_(false, { mail: false, spurenSekunden: 20 });
       if (e.fehler) throw new Error(e.fehler);

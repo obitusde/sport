@@ -1,6 +1,6 @@
 /**
  * app.js – Sport-App
- * Version: 0.9.0 (2026-11-18)
+ * Version: 0.10.0 (2026-11-18)
  *
  * Ansichten: Woche, Einstellungen.
  * Die App holt die Aktivitäten als Liste von der Apps-Script-Web-App und rechnet
@@ -35,10 +35,15 @@
  * Änderungen 0.9.0: Alltagspunkte aus Handy-Schritten (ohne Schritte während Aktivitäten)
  * zählen zum Aktivziel; Formel und Werte einstellbar (alltagPunkte, alltagFrei,
  * alltagProPunkt). Neue Ansicht „Karte“ (karte.js) und Spur in der Detailansicht.
+ * Änderungen 0.10.0: Persönliche Jahres-Abzeichen (Bronze, Silber, Gold, Rekord aus den
+ * eigenen Vorjahren) mit Hochrechnung bis Jahresende, Ski in Skitagen. Bestmarke
+ * Höhenmeter ohne Pistenski (Lift). Einstellungen neu gesetzt (Zähler mit fester Breite).
+ * Abgleich mit Garmin für einen Zeitraum (Prüfen, dann Übernehmen). Karte in der
+ * Detailansicht größer und oben, Vollbild; die Karte lädt beim Öffnen neu.
  */
 'use strict';
 
-const APP_VERSION = '0.9.0';
+const APP_VERSION = '0.10.0';
 
 const SPEICHER = {
   url: 'sport.url',
@@ -94,7 +99,8 @@ const zustand = {
   vorherigeAnsicht: 'woche',
   detailId: null,
   detailLaedt: false,
-  detailFehler: null
+  detailFehler: null,
+  abgleich: { von: null, bis: null, laedt: false, ergebnis: null, fehler: null }
 };
 
 // ---------------------------------------------------------------------------
@@ -261,6 +267,7 @@ async function vonGarminHolen() {
     return;
   }
   zustand.laedt = false;
+  karteZustand.veraltet = true;
   await allesLaden();
   if (zustand.fehler) {
     meldung('Fehler: ' + zustand.fehler);
@@ -477,7 +484,14 @@ function kalenderwoche(d) {
 /** Erster Montag mit Sportpunkten (Intensitätsminuten gibt es ab 2023). */
 const PUNKTE_START = new Date(2023, 0, 2);
 const SERIEN_STUFEN = [4, 12, 26, 52];
-const JAHRES_STUFEN = { laufen: [100, 250, 500, 1000], rad: [1000, 2500, 5000, 10000], wandern: [100, 250, 500, 1000] };
+/**
+ * Jahres-Abzeichen: persönliche Stufen aus den eigenen Vorjahren (gleich wie in
+ * gas/Meldungen.gs). Ski zählt Skitage, die anderen Kilometer. Ohne Vorjahre gelten
+ * die festen Einstiegswerte.
+ */
+const JAHRES_SPORTARTEN = { laufen: 'km', rad: 'km', wandern: 'km', ski: 'Tage' };
+const JAHRES_FEST = { laufen: [50, 100, 250, 500], rad: [250, 500, 1000, 2500], wandern: [50, 100, 250, 500], ski: [3, 7, 15, 25] };
+const STUFEN_NAMEN = ['Bronze', 'Silber', 'Gold', 'Rekord'];
 const BESTZEIT_DISTANZEN = [
   { name: '1 km', km: 1, feld: 's1k' },
   { name: '5 km', km: 5, feld: 's5k' },
@@ -607,10 +621,10 @@ function bestmarken() {
   laengste('rad', 'Längste Radtour');
   laengste('wandern', 'Längste Wanderung');
 
-  // Meiste Höhenmeter an einem Tag (alle Sportarten)
+  // Meiste Höhenmeter an einem Tag, aus eigener Kraft: ohne Pistenski (Lift zählt mit)
   const proTag = new Map();
   liste.forEach(a => {
-    if (!a.hm) return;
+    if (!a.hm || /resort_skiing/.test(a.typ || '')) return;
     const k = schluessel(a.datum);
     const t = proTag.get(k) || { hm: 0, datum: a.datum };
     t.hm += a.hm;
@@ -618,7 +632,7 @@ function bestmarken() {
   });
   let hmBest = null;
   proTag.forEach(t => { if (!hmBest || t.hm > hmBest.hm) hmBest = t; });
-  if (hmBest) ergebnis.weitere.push({ titel: 'Meiste Höhenmeter an einem Tag', wert: zahlFormat0.format(hmBest.hm) + ' m', unter: '', datum: hmBest.datum });
+  if (hmBest) ergebnis.weitere.push({ titel: 'Meiste Höhenmeter an einem Tag', wert: zahlFormat0.format(hmBest.hm) + ' m', unter: 'ohne Pistenski', datum: hmBest.datum });
 
   // Meiste Punkte (Sport + Alltag) in einer Woche
   let pktBest = null;
@@ -630,22 +644,92 @@ function bestmarken() {
   return ergebnis;
 }
 
-/** Kilometer pro Jahr und Sportart. */
-function jahresKm() {
-  const m = new Map();
+/** Zählt die Aktivität für ein Jahres-Abzeichen dieser Sportart? */
+function zaehltFuerJahr(a, sa) {
+  return a.sportart === sa && zaehlt(a) && (JAHRES_SPORTARTEN[sa] === 'Tage' || a.km > 0);
+}
+
+/** Wert einer Sportart in einem Zeitraum: Kilometer oder Tage mit Aktivität. */
+function jahresWert(sa, von, bis) {
+  const tage = new Set();
+  let summe = 0;
   zustand.aktivitaeten.forEach(a => {
-    if (!JAHRES_STUFEN[a.sportart] || !a.km || !zaehlt(a)) return;
-    const j = a.datum.getFullYear();
-    const x = m.get(j) || { laufen: 0, rad: 0, wandern: 0 };
-    x[a.sportart] += a.km;
-    m.set(j, x);
+    if (!zaehltFuerJahr(a, sa) || a.datum < von || a.datum >= bis) return;
+    if (JAHRES_SPORTARTEN[sa] === 'Tage') tage.add(schluessel(a.datum));
+    else summe += a.km;
   });
+  return JAHRES_SPORTARTEN[sa] === 'Tage' ? tage.size : summe;
+}
+
+/** Werte pro Kalenderjahr: Map Jahr → Wert. */
+function jahresWerte(sa) {
+  const jahre = new Set();
+  zustand.aktivitaeten.forEach(a => { if (zaehltFuerJahr(a, sa)) jahre.add(a.datum.getFullYear()); });
+  const m = new Map();
+  jahre.forEach(j => m.set(j, jahresWert(sa, new Date(j, 0, 1), new Date(j + 1, 0, 1))));
   return m;
 }
 
-/** Höchste erreichte Stufe oder 0. */
-function stufeErreicht(sportart, kmWert) {
-  return JAHRES_STUFEN[sportart].filter(s => kmWert >= s).pop() || 0;
+/** Rundet auf „schöne“ Zahlen: 37 → 35, 184 → 180, 1234 → 1250. */
+function schoeneZahl(x, einheit) {
+  if (einheit === 'Tage' || x < 20) return Math.max(1, Math.round(x));
+  const schritt = x < 100 ? 5 : x < 1000 ? 10 : 50;
+  return Math.max(schritt, Math.round(x / schritt) * schritt);
+}
+
+/**
+ * Stufen für ein Jahr: Bronze = 50 % des Schnitts der letzten 3 Jahre, Silber = Schnitt,
+ * Gold = bestes dieser Jahre (mindestens 15 % über dem Schnitt), Rekord = bestes Jahr
+ * überhaupt (nur wenn höher als Gold). Jahre vor der ersten Aktivität zählen nicht.
+ * @return {{stufen: [{name, wert}], fest: boolean, rekordJahr: (number|null), werte: Map}}
+ */
+function jahresStufen(sa, jahr, werte) {
+  werte = werte || jahresWerte(sa);
+  const einheit = JAHRES_SPORTARTEN[sa];
+  const erstes = Math.min(...Array.from(werte.keys()));
+  const frueher = [jahr - 3, jahr - 2, jahr - 1].filter(j => j >= erstes);
+  const vals = frueher.map(j => werte.get(j) || 0);
+  const schnitt = vals.length ? vals.reduce((x, y) => x + y, 0) / vals.length : 0;
+  if (!isFinite(erstes) || !vals.length || schnitt <= 0) {
+    return { stufen: JAHRES_FEST[sa].map((w, k) => ({ name: STUFEN_NAMEN[k], wert: w })), fest: true, rekordJahr: null, werte };
+  }
+  const roh = [
+    { name: 'Bronze', wert: schoeneZahl(schnitt * 0.5, einheit) },
+    { name: 'Silber', wert: schoeneZahl(schnitt, einheit) },
+    { name: 'Gold', wert: schoeneZahl(Math.max(Math.max(...vals), schnitt * 1.15), einheit) }
+  ];
+  let rekordJahr = null;
+  let rekord = 0;
+  werte.forEach((w, j) => { if (j < jahr && w > rekord) { rekord = w; rekordJahr = j; } });
+  if (schoeneZahl(rekord, einheit) > roh[2].wert) roh.push({ name: 'Rekord', wert: schoeneZahl(rekord, einheit) });
+  else rekordJahr = null;
+  // Gleiche Werte zusammenfassen (z. B. bei sehr kleinen Zahlen)
+  const stufen = roh.filter((x, k) => k === 0 || x.wert > roh[k - 1].wert);
+  return { stufen, fest: false, rekordJahr, werte };
+}
+
+/**
+ * Hochrechnung bis Jahresende: aktueller Wert plus das, was in den letzten 3 Jahren im
+ * Schnitt ab heute bis Silvester dazukam (berücksichtigt die Saison, z. B. Ski im Winter).
+ * Ohne Vorjahre linear ab Ende Januar. null, wenn nichts Sinnvolles möglich ist.
+ */
+function jahresHochrechnung(sa, heute, werte) {
+  const jahr = heute.getFullYear();
+  const erstes = Math.min(...Array.from(werte.keys()));
+  const aktuell = jahresWert(sa, new Date(jahr, 0, 1), tagePlus(heute, 1));
+  const frueher = [jahr - 3, jahr - 2, jahr - 1].filter(j => j >= erstes);
+  if (frueher.length) {
+    const rest = frueher.map(j => jahresWert(sa, new Date(j, heute.getMonth(), heute.getDate() + 1), new Date(j + 1, 0, 1)));
+    return aktuell + rest.reduce((x, y) => x + y, 0) / rest.length;
+  }
+  const tag = Math.round((heute - new Date(jahr, 0, 1)) / 86400000) + 1;
+  if (tag < 30) return null;
+  return aktuell * (new Date(jahr, 11, 31) - new Date(jahr, 0, 1) + 86400000) / 86400000 / tag;
+}
+
+function jahresEinheit(wert, einheit) {
+  if (einheit === 'Tage') return wert + (wert === 1 ? ' Tag' : ' Tage');
+  return zahlFormat0.format(wert) + ' km';
 }
 
 /** Wochen mit mindestens 3 Sportarten (ohne „andere“). */
@@ -696,19 +780,15 @@ function wochenErfolge(w) {
     if (x.datum >= w.start && x.datum < tagePlus(w.start, 7)) punkte.push({ text: 'Bestmarke: ' + x.titel + ' – ' + x.wert, stark: true });
   });
 
-  // Jahres-km-Stufen, die in dieser Woche überschritten wurden
+  // Jahres-Abzeichen, die in dieser Woche erreicht wurden
   const jahr = w.ende.getFullYear();
   const jahresbeginn = new Date(jahr, 0, 1);
-  Object.keys(JAHRES_STUFEN).forEach(sa => {
-    let vorher = 0;
-    let nachher = 0;
-    zustand.aktivitaeten.forEach(a => {
-      if (a.sportart !== sa || !a.km || !zaehlt(a) || a.datum < jahresbeginn || a.datum.getFullYear() !== jahr) return;
-      if (a.datum < w.start) vorher += a.km;
-      if (a.datum < tagePlus(w.start, 7)) nachher += a.km;
-    });
-    const s = stufeErreicht(sa, nachher);
-    if (s && s > stufeErreicht(sa, vorher)) punkte.push({ text: 'Jahres-Abzeichen: ' + zahlFormat0.format(s) + ' km ' + SPORT_NAME[sa] + ' ' + jahr, stark: true });
+  Object.keys(JAHRES_SPORTARTEN).forEach(sa => {
+    const vorher = jahresWert(sa, jahresbeginn, w.start < jahresbeginn ? jahresbeginn : w.start);
+    const nachher = jahresWert(sa, jahresbeginn, new Date(Math.min(tagePlus(w.start, 7), new Date(jahr + 1, 0, 1))));
+    if (nachher <= vorher) return;
+    const st = jahresStufen(sa, jahr).stufen.filter(x => nachher >= x.wert && vorher < x.wert).pop();
+    if (st) punkte.push({ text: 'Jahres-Abzeichen ' + st.name + ': ' + SPORT_NAME[sa] + ' ' + jahr + ' (' + jahresEinheit(st.wert, JAHRES_SPORTARTEN[sa]) + ')', stark: true });
   });
 
   if (w.sportarten.size >= 3) punkte.push({ text: 'Allrounder-Woche: ' + w.sportarten.size + ' Sportarten' });
@@ -1092,6 +1172,46 @@ function bestmarkeZeile(x) {
     : `<div class="bestmarke">${inhalt}</div>`;
 }
 
+function jahresAbzeichenHtml() {
+  const heute = new Date();
+  const jahr = heute.getFullYear();
+  return Object.keys(JAHRES_SPORTARTEN).map(sa => {
+    const einheit = JAHRES_SPORTARTEN[sa];
+    const werte = jahresWerte(sa);
+    if (sa === 'ski' && !werte.size) return '';
+    const st = jahresStufen(sa, jahr, werte);
+    const wert = jahresWert(sa, new Date(jahr, 0, 1), new Date(jahr + 1, 0, 1));
+    const naechste = st.stufen.find(x => wert < x.wert);
+    const letzte = st.stufen[st.stufen.length - 1];
+    const anteil = naechste ? wert / naechste.wert : 1;
+    const wertText = einheit === 'Tage' ? jahresEinheit(wert, einheit) : km(wert);
+    let text;
+    if (naechste) {
+      const fehlt = naechste.wert - wert;
+      text = 'Noch ' + (einheit === 'Tage' ? jahresEinheit(fehlt, einheit) : km(fehlt)) + ' bis ' + naechste.name;
+    } else {
+      text = 'Alle Stufen geschafft' + (st.stufen.some(x => x.name === 'Rekord') || st.fest ? '' : ' – so viel wie nie zuvor');
+    }
+    const hoch = jahresHochrechnung(sa, heute, werte);
+    if (hoch !== null && naechste) {
+      const ziel = st.stufen.filter(x => hoch >= x.wert).pop();
+      const danach = st.stufen.find(x => hoch < x.wert);
+      const hochText = einheit === 'Tage' ? 'ca. ' + jahresEinheit(Math.round(hoch), einheit) : 'ca. ' + zahlFormat0.format(Math.round(hoch)) + ' km';
+      text += '<br>Hochrechnung bis Jahresende: ' + hochText;
+      if (ziel && ziel.wert > wert) text += ' – ' + ziel.name + ' ist drin';
+      if (danach) text += (ziel && ziel.wert > wert ? ', für ' : ' – für ') + danach.name + ' fehlen dann noch ' +
+        (einheit === 'Tage' ? jahresEinheit(Math.ceil(danach.wert - hoch), einheit) : 'ca. ' + zahlFormat0.format(Math.ceil(danach.wert - hoch)) + ' km');
+    }
+    const rekordText = st.rekordJahr ? ' <span class="leise">(Rekord ' + st.rekordJahr + ')</span>' : '';
+    return `<div class="jahr-zeile" style="--farbe: var(--${sa})">
+      <div class="ziel-zeile"><b>${SPORT_NAME[sa]} ${wertText}</b></div>
+      <div class="stufen">${st.stufen.map(x => `<span class="stufe ${wert >= x.wert ? 'an' : ''}"><small>${x.name}</small>${einheit === 'Tage' ? x.wert : zahlFormat0.format(x.wert)}</span>`).join('')}</div>
+      <div class="balken"><span style="width:${(Math.min(1, anteil) * 100).toFixed(1)}%"></span></div>
+      <div class="leise klein-text">${text}${st.fest ? ' · feste Einstiegswerte (noch kein volles Vorjahr)' : ''}${naechste ? '' : rekordText}</div>
+    </div>`;
+  }).join('') + '<p class="leise klein-text" style="margin:12px 0 0">Einheit: ' + Object.keys(JAHRES_SPORTARTEN).filter(sa => JAHRES_SPORTARTEN[sa] === 'Tage').map(sa => SPORT_NAME[sa] + ' in Tagen').join(', ') + ', sonst Kilometer.</p>';
+}
+
 function ansichtErfolge() {
   if (!zustand.aktivitaeten.length) return '<h1>Erfolge</h1><div class="karte leer">Noch keine Daten geladen.</div>';
   const sl = serieLaufen();
@@ -1112,22 +1232,8 @@ function ansichtErfolge() {
   if (b.weitere.length) html += '<h2>Bestmarken</h2><section class="karte liste-karte">' + b.weitere.map(bestmarkeZeile).join('') + '</section>';
 
   // Jahres-Abzeichen für das laufende Jahr
-  const jetzt = new Date().getFullYear();
-  const aktuell = jahresKm().get(jetzt) || { laufen: 0, rad: 0, wandern: 0 };
-  html += '<h2>Jahres-Abzeichen ' + jetzt + '</h2><section class="karte">' + Object.keys(JAHRES_STUFEN).map(sa => {
-    const wert = aktuell[sa];
-    const stufen = JAHRES_STUFEN[sa];
-    const naechste = stufen.find(s => wert < s);
-    const anteil = naechste ? wert / naechste : 1;
-    const erreicht = stufen.filter(s => wert >= s);
-    return `<div class="jahr-zeile" style="--farbe: var(--${sa})">
-      <div class="ziel-zeile"><b>${SPORT_NAME[sa]} ${km(wert)}</b>
-        <span class="stufen">${stufen.map(s => `<span class="stufe ${wert >= s ? 'an' : ''}">${zahlFormat0.format(s)}</span>`).join('')}</span></div>
-      <div class="balken"><span style="width:${(anteil * 100).toFixed(1)}%"></span></div>
-      <div class="leise klein-text">${naechste ? 'Noch ' + km(naechste - wert) + ' bis zum Abzeichen ' + zahlFormat0.format(naechste) + ' km' : 'Alle Abzeichen geschafft'}${erreicht.length ? ' · geschafft: ' + erreicht.map(s => zahlFormat0.format(s)).join(', ') + ' km' : ''}</div>
-    </div>`;
-  }).join('') + '</section>';
-  html += '<p class="leise klein-text">Jedes Jahr startet bei null. Den Vergleich mit früheren Jahren findest du unter „Form“.</p>';
+  html += '<h2>Jahres-Abzeichen ' + new Date().getFullYear() + '</h2><section class="karte">' + jahresAbzeichenHtml() + '</section>';
+  html += '<p class="leise klein-text">Die Stufen richten sich nach deinen letzten 3 Jahren: Bronze = halbes normales Jahr, Silber = dein Schnitt, Gold = dein bestes dieser Jahre, Rekord = dein bestes Jahr überhaupt. Jedes Jahr startet bei null.</p>';
 
   const ar = allrounderWochen();
   html += `<h2>Allrounder</h2><section class="karte"><p style="margin:0"><b>${ar.length}</b> ${ar.length === 1 ? 'Woche' : 'Wochen'} mit mindestens 3 Sportarten${ar.length ? ' · zuletzt KW ' + kalenderwoche(ar[ar.length - 1]) + '/' + ar[ar.length - 1].getFullYear() : ''}</p></section>`;
@@ -1137,13 +1243,120 @@ function ansichtErfolge() {
 function zaehlerHtml(wert, aktionMinus, aktionPlus, min, max, text, unter) {
   const v = verbindung();
   return `<div class="zaehler">
-      <button class="rund" data-aktion="${aktionMinus}" aria-label="Verringern" ${wert <= min || !v.token ? 'disabled' : ''}>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg></button>
-      <span class="zaehler-wert">${wert}</span>
-      <button class="rund" data-aktion="${aktionPlus}" aria-label="Erhöhen" ${wert >= max || !v.token ? 'disabled' : ''}>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
-      <span>${text}<br><span class="leise">${unter}</span></span>
+      <div class="zaehler-text"><b>${text}</b><small>${unter}</small></div>
+      <div class="zaehler-steuer">
+        <button class="rund" data-aktion="${aktionMinus}" aria-label="${text}: weniger" ${wert <= min || !v.token ? 'disabled' : ''}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg></button>
+        <span class="zaehler-wert">${zahlFormat0.format(wert)}</span>
+        <button class="rund" data-aktion="${aktionPlus}" aria-label="${text}: mehr" ${wert >= max || !v.token ? 'disabled' : ''}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+      </div>
     </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Abgleich mit Garmin (Einstellungen)
+// ---------------------------------------------------------------------------
+
+const ABGLEICH_FELD_NAMEN = {
+  start: 'Start', sportart: 'Sportart', garminTyp: 'Garmin-Typ', name: 'Name', distanz_km: 'Distanz',
+  dauer_min: 'Bewegungszeit', dauer_gesamt_min: 'Gesamtzeit', hoehenmeter: 'Höhenmeter', puls_avg: 'Ø Puls',
+  hat_gps: 'GPS', details: 'Weitere Werte (Puls, Training …)'
+};
+
+/** „2026-11-17 08:30“ → „17.11.2026 08:30“ */
+function abgleichDatum(text) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}:\d{2}))?/.exec(String(text || ''));
+  return m ? (+m[3]) + '.' + (+m[2]) + '.' + m[1] + (m[4] ? ' ' + m[4] : '') : String(text || '');
+}
+
+function abgleichWertText(feld, wert) {
+  if (wert === '' || wert === null || wert === undefined) return '–';
+  if (feld === 'distanz_km') return km(Number(wert));
+  if (feld === 'dauer_min' || feld === 'dauer_gesamt_min') return dauer(Number(wert));
+  if (feld === 'hoehenmeter') return zahlFormat0.format(Number(wert)) + ' m';
+  if (feld === 'sportart') return SPORT_NAME[wert] || wert;
+  if (feld === 'hat_gps') return wert === 'true' ? 'ja' : 'nein';
+  if (feld === 'start') return abgleichDatum(wert);
+  return String(wert);
+}
+
+function abgleichHtml() {
+  const v = verbindung();
+  const ab = zustand.abgleich;
+  const heute = new Date();
+  const von = ab.von || schluessel(tagePlus(heute, -30));
+  const bis = ab.bis || schluessel(heute);
+  const e = ab.ergebnis;
+  const ART = { geaendert: 'Geändert', geloescht: 'Bei Garmin gelöscht', neu: 'Fehlt in der App' };
+  let liste = '';
+  if (e) {
+    if (!e.aenderungen.length) {
+      liste = `<p class="leise">${e.uebernommen ? 'Übernommen.' : 'Keine Unterschiede.'} ${e.garmin} ${e.garmin === 1 ? 'Aktivität' : 'Aktivitäten'} bei Garmin im Zeitraum.</p>`;
+    } else {
+      liste = '<ul class="abgleich-liste">' + e.aenderungen.map(x => {
+        const felder = (x.felder || []).map(f => f.feld === 'details' ? ABGLEICH_FELD_NAMEN.details
+          : `${ABGLEICH_FELD_NAMEN[f.feld] || f.feld}: ${esc(abgleichWertText(f.feld, f.alt))} → ${esc(abgleichWertText(f.feld, f.neu))}`);
+        return `<li class="abgleich-${x.art}" style="--farbe: var(--${esc(x.sportart) || 'andere'})">
+          <span class="abgleich-art">${ART[x.art]}${x.grund ? ' · ' + esc(x.grund) : ''}</span>
+          <b>${esc(x.name || SPORT_NAME[x.sportart] || 'Aktivität')}</b>
+          <small>${esc(abgleichDatum(x.datum))} · ${esc(SPORT_NAME[x.sportart] || x.sportart)}${x.km ? ' · ' + km(x.km) : ''}</small>
+          ${felder.length ? '<small>' + felder.join('<br>') + '</small>' : ''}
+        </li>`;
+      }).join('') + '</ul>';
+      if (e.uebernommen) liste = '<p><b>Übernommen:</b></p>' + liste;
+    }
+  }
+  const offen = e && !e.uebernommen && e.aenderungen.length;
+  return `<h2>Mit Garmin abgleichen</h2>
+  <section class="karte">
+    <p class="leise klein-text" style="margin-top:0">Für Aktivitäten, die du bei Garmin nachträglich geändert oder gelöscht hast. Wähle den Zeitraum, in dem die Aktivitäten stattfanden. „Prüfen“ ändert noch nichts.</p>
+    <div class="datum-reihe">
+      <label class="feld"><span>Von</span><input type="date" data-abgleich="von" value="${von}" max="${schluessel(heute)}"></label>
+      <label class="feld"><span>Bis</span><input type="date" data-abgleich="bis" value="${bis}" max="${schluessel(heute)}"></label>
+    </div>
+    <div class="knopfreihe">
+      <button class="knopf" data-aktion="abgleich-pruefen" ${ab.laedt || !v.token ? 'disabled' : ''}>${ab.laedt === 'pruefen' ? 'Prüfe …' : 'Prüfen'}</button>
+      ${offen ? `<button class="knopf haupt" data-aktion="abgleich-uebernehmen" ${ab.laedt ? 'disabled' : ''}>${ab.laedt === 'uebernehmen' ? 'Übernehme …' : e.aenderungen.length + (e.aenderungen.length === 1 ? ' Änderung' : ' Änderungen') + ' übernehmen'}</button>` : ''}
+    </div>
+    ${ab.fehler ? `<p class="hinweis-fehler">${esc(ab.fehler)}</p>` : ''}
+    ${liste}
+  </section>`;
+}
+
+async function abgleichStarten(uebernehmen) {
+  const ab = zustand.abgleich;
+  if (ab.laedt) return;
+  const heute = new Date();
+  const von = ab.von || schluessel(tagePlus(heute, -30));
+  const bis = ab.bis || schluessel(heute);
+  if (von > bis) {
+    ab.fehler = '„Von“ liegt nach „Bis“.';
+    zeichnen();
+    return;
+  }
+  ab.laedt = uebernehmen ? 'uebernehmen' : 'pruefen';
+  ab.fehler = null;
+  if (!uebernehmen) ab.ergebnis = null;
+  zeichnen();
+  try {
+    const antwort = await api('abgleich', { von: von, bis: bis, uebernehmen: uebernehmen ? 1 : 0 });
+    ab.ergebnis = antwort;
+    if (uebernehmen) {
+      // Zwischengespeicherte Details geänderter Aktivitäten verwerfen
+      const alle = gespeicherteDetails();
+      antwort.aenderungen.forEach(x => { delete alle[x.id]; });
+      schreiben(SPEICHER.details, alle);
+      if (typeof karteZustand !== 'undefined') karteZustand.veraltet = true;
+      meldung(antwort.aenderungen.length + (antwort.aenderungen.length === 1 ? ' Änderung' : ' Änderungen') + ' übernommen.');
+    }
+  } catch (err) {
+    ab.fehler = err.message;
+  } finally {
+    ab.laedt = false;
+    zeichnen();
+  }
+  if (uebernehmen && !ab.fehler) allesLaden();
 }
 
 function ansichtEinstellungen() {
@@ -1157,20 +1370,18 @@ function ansichtEinstellungen() {
   <button class="knopf voll" data-aktion="hilfe">So funktioniert die App</button>
 
   <h2>Wochenziele</h2>
-  <section class="karte">
-    ${zaehlerHtml(ziel, 'ziel-minus', 'ziel-plus', 0, 14, 'Läufe pro Woche', 'Laufziel, Montag bis Sonntag')}
-  </section>
-  <section class="karte">
-    ${zaehlerHtml(zielPunkte, 'punkte-minus', 'punkte-plus', 0, 1000, 'Punkte pro Woche', 'Aktivziel: Sport + Alltag · Garmin/WHO: 150')}
+  <section class="karte zaehler-karte">
+    ${zaehlerHtml(ziel, 'ziel-minus', 'ziel-plus', 0, 14, 'Läufe pro Woche', 'Montag bis Sonntag')}
+    ${zaehlerHtml(zielPunkte, 'punkte-minus', 'punkte-plus', 0, 1000, 'Punkte pro Woche', 'Sport + Alltag · empfohlen 150')}
   </section>
   <section class="karte">
     <label class="schalter-zeile">
-      <span><b>Alltagspunkte aus Schritten</b><small>Handy-Schritte außerhalb aufgezeichneter Aktivitäten zählen zum Aktivziel</small></span>
+      <span><b>Alltagspunkte aus Schritten</b><small>Handy-Schritte außerhalb von Aktivitäten zählen zum Aktivziel</small></span>
       <input type="checkbox" data-einst="alltagPunkte" ${Number(zustand.einstellungen.alltagPunkte) ? 'checked' : ''} ${v.token ? '' : 'disabled'}>
     </label>
-    <div class="${Number(zustand.einstellungen.alltagPunkte) ? '' : 'aus'}">
-      ${zaehlerHtml(Number(zustand.einstellungen.alltagFrei), 'frei-minus', 'frei-plus', 0, 20000, 'Schritte frei pro Tag', 'Grundbewegung ohne Punkte · Standard 3000')}
-      ${zaehlerHtml(Number(zustand.einstellungen.alltagProPunkt), 'propunkt-minus', 'propunkt-plus', 20, 2000, 'Schritte pro Punkt', 'Standard 200 · 7000–8000 Schritte/Tag ≈ 150 pro Woche')}
+    <div class="zaehler-karte ${Number(zustand.einstellungen.alltagPunkte) ? '' : 'aus'}">
+      ${zaehlerHtml(Number(zustand.einstellungen.alltagFrei), 'frei-minus', 'frei-plus', 0, 20000, 'Schritte frei pro Tag', 'ohne Punkte · Standard 3000')}
+      ${zaehlerHtml(Number(zustand.einstellungen.alltagProPunkt), 'propunkt-minus', 'propunkt-plus', 20, 2000, 'Schritte pro Punkt', 'Standard 200')}
     </div>
   </section>
 
@@ -1190,6 +1401,8 @@ function ansichtEinstellungen() {
       </div>
     </form>
   </section>
+
+  ${abgleichHtml()}
 
   <h2>Daten</h2>
   <section class="karte">
@@ -1324,6 +1537,8 @@ function ansichtDetail() {
     html += `<div class="hinweis-box">Diese Aktivität ist unrealistisch (${esc(a.unplausibel)}). Vermutlich lief die Aufzeichnung im Auto oder Zug weiter. Sie zählt nicht für Kilometer, Höhenmeter, Bestmarken und Vergleiche, Sportpunkte zählen weiter.</div>`;
   }
 
+  html += detailSpurHtml(a);
+
   // Kennzahlen
   const kz = [];
   if (a.km) kz.push(kennzahl(km(a.km), 'Distanz'));
@@ -1340,7 +1555,6 @@ function ansichtDetail() {
   if (a.minGesamt && a.min && a.minGesamt - a.min >= 1) kz.push(kennzahl(dauer(a.minGesamt), 'Gesamtzeit'));
   if (d.vMaxMs && !lauf) kz.push(kennzahl(dezimal1.format(d.vMaxMs * 3.6) + ' km/h', 'Max. Geschwindigkeit'));
   html += '<div class="kennzahlen">' + kz.join('') + '</div>';
-  html += detailSpurHtml(a);
 
   if (zustand.detailLaedt) return html + '<p class="leise stand">Lade Details …</p>';
   if (zustand.detailFehler) return html + `<p class="hinweis-fehler stand">${esc(zustand.detailFehler)}</p>`;
@@ -1473,6 +1687,7 @@ document.addEventListener('click', ereignis => {
   const ziel = ereignis.target.closest('[data-ansicht], [data-aktion]');
   if (!ziel) return;
   if (ziel.dataset.ansicht) {
+    if (ziel.dataset.ansicht === 'karte') karteZustand.veraltet = true; // beim Öffnen neu laden
     zustand.ansicht = ziel.dataset.ansicht;
     if (zustand.ansicht === 'woche') zustand.wocheVersatz = 0;
     zeichnen();
@@ -1506,6 +1721,10 @@ document.addEventListener('click', ereignis => {
       zeichnen();
       break;
     case 'von-garmin': vonGarminHolen(); break;
+    case 'abgleich-pruefen': abgleichStarten(false); break;
+    case 'abgleich-uebernehmen':
+      if (confirm('Änderungen von Garmin übernehmen? Gelöschte Aktivitäten werden auch in der App gelöscht.')) abgleichStarten(true);
+      break;
     case 'verbindung-loeschen':
       if (confirm('Verbindung und gespeicherte Daten auf diesem Gerät löschen?')) {
         Object.values(SPEICHER).forEach(k => schreiben(k, null));
@@ -1521,6 +1740,12 @@ document.addEventListener('click', ereignis => {
 // Benachrichtigungs-Einstellungen sofort speichern
 document.addEventListener('change', ereignis => {
   if (ereignis.target.closest('[data-nb]') && inApp()) benachrichtigungenSpeichern();
+  const abgleichFeld = ereignis.target.closest('[data-abgleich]');
+  if (abgleichFeld) {
+    zustand.abgleich[abgleichFeld.dataset.abgleich] = abgleichFeld.value || null;
+    zustand.abgleich.ergebnis = null; // altes Ergebnis passt nicht mehr zum Zeitraum
+    zeichnen();
+  }
   const einst = ereignis.target.closest('[data-einst]');
   if (einst) einstellungAendern(einst.dataset.einst, einst.checked ? 1 : 0, 'Alltagspunkte');
   if (ereignis.target.closest('[data-karte="jahr"]')) {
@@ -1548,6 +1773,11 @@ document.addEventListener('submit', async ereignis => {
 
 // Zurück-Taste (Handy) bzw. Knopf „Zurück“ schließt die Detailansicht
 window.addEventListener('popstate', () => {
+  if (karteZustand.vollbild) {
+    karteZustand.vollbild = null;
+    zeichnen();
+    return;
+  }
   if (zustand.ansicht === 'detail' || zustand.ansicht === 'hilfe') {
     zustand.ansicht = zustand.vorherigeAnsicht || 'woche';
     zustand.detailId = null;
@@ -1558,6 +1788,8 @@ window.addEventListener('popstate', () => {
 // Beim Zurückkehren in die App neu laden, wenn die Daten älter als 10 Minuten sind
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
+  karteZustand.veraltet = true;
+  if (zustand.ansicht === 'karte') spurenLaden(true);
   const alter = zustand.datenStand ? Date.now() - new Date(zustand.datenStand).getTime() : Infinity;
   if (alter > 10 * 60 * 1000) allesLaden();
 });

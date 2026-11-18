@@ -1,6 +1,6 @@
 /**
  * Meldungen.gs – Texte für die Benachrichtigungen der Android-App
- * Version: 0.9.0 (2026-11-18)
+ * Version: 0.10.0 (2026-11-18)
  *
  * Aufruf über die Web-App: aktion=meldung&art=<art>
  *   test        feste Test-Meldung (Diagnose der ganzen Kette)
@@ -14,6 +14,8 @@
  * Ø der 90 Tage davor), sobald das Handy Schritte geschickt hat.
  * Ab 0.9.0 zählen Alltagspunkte (Schritte.gs) zu den Punkten des Aktivziels; die Texte
  * zeigen „Punkte: 135 von 150 (95 Sport + 40 Alltag)“.
+ * Ab 0.10.0 sind die Jahres-Abzeichen persönlich (Bronze, Silber, Gold, Rekord aus den
+ * eigenen Vorjahren, Ski in Skitagen), gleiche Regeln wie jahresStufen in docs/app.js.
  *
  * Die Regeln entsprechen der App (docs/app.js): Woche Montag bis Sonntag, Serien mit
  * offener laufender Woche, Sportpunkte ab 2023, Grenzen für unrealistische Aktivitäten,
@@ -28,7 +30,9 @@ const MELDUNG_GRENZEN = {
   schwimmen: { kmh: 6, km: 15 }
 };
 const MELDUNG_SERIEN_STUFEN = [4, 12, 26, 52];
-const MELDUNG_JAHRES_STUFEN = { laufen: [100, 250, 500, 1000], rad: [1000, 2500, 5000, 10000], wandern: [100, 250, 500, 1000] };
+const MELDUNG_JAHRES_EINHEIT = { laufen: 'km', rad: 'km', wandern: 'km', ski: 'Tage' };
+const MELDUNG_JAHRES_FEST = { laufen: [50, 100, 250, 500], rad: [250, 500, 1000, 2500], wandern: [50, 100, 250, 500], ski: [3, 7, 15, 25] };
+const MELDUNG_STUFEN_NAMEN = ['Bronze', 'Silber', 'Gold', 'Rekord'];
 const MELDUNG_BESTZEITEN = [{ name: '1 km', km: 1, feld: 's1k' }, { name: '5 km', km: 5, feld: 's5k' }, { name: '10 km', km: 10, feld: 's10k' }];
 const MELDUNG_SPORT_NAME = { laufen: 'Laufen', rad: 'Rad', wandern: 'Wandern', ski: 'Ski', schwimmen: 'Schwimmen', andere: 'Andere' };
 
@@ -301,21 +305,74 @@ function meldungErfolge_(liste, seit, heute) {
 
   // Jahres-Abzeichen, die durch neue Aktivitäten erreicht wurden
   const jahr = heute.getFullYear();
-  Object.keys(MELDUNG_JAHRES_STUFEN).forEach(function (sa) {
-    let vorher = 0;
-    let nachher = 0;
-    zaehlt.forEach(function (a) {
-      if (a.sportart !== sa || !a.km || a.datum.getFullYear() !== jahr) return;
-      nachher += a.km;
-      if (!neu(a)) vorher += a.km;
-    });
-    const stufen = MELDUNG_JAHRES_STUFEN[sa];
-    const erreichtNeu = stufen.filter(function (s) { return nachher >= s && vorher < s; });
-    if (erreichtNeu.length) {
-      zeilen.push('Jahres-Abzeichen: ' + erreichtNeu[erreichtNeu.length - 1] + ' km ' + MELDUNG_SPORT_NAME[sa] + ' ' + jahr);
+  Object.keys(MELDUNG_JAHRES_EINHEIT).forEach(function (sa) {
+    const imJahr = function (a) { return a.datum.getFullYear() === jahr; };
+    const nachher = meldungJahresWert_(zaehlt, sa, imJahr);
+    const vorher = meldungJahresWert_(zaehlt, sa, function (a) { return imJahr(a) && !neu(a); });
+    if (nachher <= vorher) return;
+    const erreicht = meldungJahresStufen_(zaehlt, sa, jahr).filter(function (x) { return nachher >= x.wert && vorher < x.wert; });
+    if (erreicht.length) {
+      const x = erreicht[erreicht.length - 1];
+      zeilen.push('Jahres-Abzeichen ' + x.name + ': ' + MELDUNG_SPORT_NAME[sa] + ' ' + jahr + ' (' +
+        x.wert + (MELDUNG_JAHRES_EINHEIT[sa] === 'Tage' ? ' Tage' : ' km') + ')');
     }
   });
 
   if (!zeilen.length) return null;
   return { titel: zeilen.length === 1 ? 'Neuer Erfolg' : 'Neue Erfolge', text: zeilen.join('\n') };
+}
+
+// ---------------------------------------------------------------------------
+// Jahres-Abzeichen (gleiche Regeln wie jahresStufen in docs/app.js)
+// ---------------------------------------------------------------------------
+
+/** Kilometer oder Tage mit Aktivität einer Sportart für alle Aktivitäten, die filter erfüllen. */
+function meldungJahresWert_(liste, sa, filter) {
+  const tage = {};
+  let summe = 0;
+  liste.forEach(function (a) {
+    if (a.sportart !== sa || !filter(a)) return;
+    if (MELDUNG_JAHRES_EINHEIT[sa] === 'Tage') tage[meldungSchluessel_(a.datum)] = true;
+    else if (a.km > 0) summe += a.km;
+  });
+  return MELDUNG_JAHRES_EINHEIT[sa] === 'Tage' ? Object.keys(tage).length : summe;
+}
+
+function meldungSchoeneZahl_(x, einheit) {
+  if (einheit === 'Tage' || x < 20) return Math.max(1, Math.round(x));
+  const schritt = x < 100 ? 5 : x < 1000 ? 10 : 50;
+  return Math.max(schritt, Math.round(x / schritt) * schritt);
+}
+
+/**
+ * Stufen [{name, wert}] für ein Jahr: Bronze = 50 % des Schnitts der letzten 3 Jahre,
+ * Silber = Schnitt, Gold = bestes dieser Jahre (mindestens 15 % über dem Schnitt),
+ * Rekord = bestes Jahr überhaupt (nur wenn höher als Gold). Ohne Vorjahre feste Werte.
+ */
+function meldungJahresStufen_(liste, sa, jahr) {
+  const einheit = MELDUNG_JAHRES_EINHEIT[sa];
+  const werte = {};
+  liste.forEach(function (a) {
+    if (a.sportart === sa && (einheit === 'Tage' || a.km > 0)) werte[a.datum.getFullYear()] = true;
+  });
+  const jahre = Object.keys(werte).map(Number);
+  jahre.forEach(function (j) {
+    werte[j] = meldungJahresWert_(liste, sa, function (a) { return a.datum.getFullYear() === j; });
+  });
+  const erstes = jahre.length ? Math.min.apply(null, jahre) : Infinity;
+  const frueher = [jahr - 3, jahr - 2, jahr - 1].filter(function (j) { return j >= erstes; });
+  const vals = frueher.map(function (j) { return werte[j] || 0; });
+  const schnitt = vals.length ? vals.reduce(function (x, y) { return x + y; }, 0) / vals.length : 0;
+  if (!vals.length || schnitt <= 0) {
+    return MELDUNG_JAHRES_FEST[sa].map(function (w, k) { return { name: MELDUNG_STUFEN_NAMEN[k], wert: w }; });
+  }
+  const roh = [
+    { name: 'Bronze', wert: meldungSchoeneZahl_(schnitt * 0.5, einheit) },
+    { name: 'Silber', wert: meldungSchoeneZahl_(schnitt, einheit) },
+    { name: 'Gold', wert: meldungSchoeneZahl_(Math.max(Math.max.apply(null, vals), schnitt * 1.15), einheit) }
+  ];
+  let rekord = 0;
+  jahre.forEach(function (j) { if (j < jahr && werte[j] > rekord) rekord = werte[j]; });
+  if (meldungSchoeneZahl_(rekord, einheit) > roh[2].wert) roh.push({ name: 'Rekord', wert: meldungSchoeneZahl_(rekord, einheit) });
+  return roh.filter(function (x, k) { return k === 0 || x.wert > roh[k - 1].wert; });
 }
