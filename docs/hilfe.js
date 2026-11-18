@@ -1,6 +1,6 @@
 /**
  * hilfe.js – Erklär-Seite „So funktioniert die App“
- * Version: 0.6.0 (2026-11-17)
+ * Version: 0.7.0 (2026-11-18)
  *
  * Erreichbar über das „?“ in „Form“ und „Erfolge“ sowie über die Einstellungen.
  * Werte wie Ziele und Grenzen werden aus app.js gelesen, damit der Text stimmt,
@@ -64,6 +64,11 @@ function ansichtHilfe() {
       <p>Manchmal läuft die Aufzeichnung im Auto oder Zug weiter. Solche Aktivitäten erkennt die App an diesen Grenzen:</p>
       <p class="leise">${grenzen}</p>
       <p>Sie bleiben in der Liste („zählt nicht“), zählen aber nicht für Kilometer, Höhenmeter, Zeit, Bestmarken und Vergleiche. Sportpunkte zählen weiter, weil sie auf dem Puls beruhen.</p>`)}
+
+    ${abschnitt('Android-App und Benachrichtigungen', `
+      <p>Die Android-App zeigt dieselbe Oberfläche wie die Webseite und kann zusätzlich Benachrichtigungen schicken. Sie wird in GitHub gebaut; neue Versionen meldet sie selbst („Update verfügbar“).</p>
+      <p><b>Erinnerung:</b> zur eingestellten Zeit, aber nur, wenn ein Wochenziel noch offen ist. <b>Wochenrückblick:</b> Ziele, Serien und Vergleich mit deinem Schnitt; Montag bis Donnerstag über die vergangene Woche, sonst über die laufende. <b>Erfolge:</b> neue Bestzeiten, Bestmarken und Jahres-Abzeichen, sobald neue Aktivitäten importiert sind.</p>
+      <p>Die App prüft etwa alle 30 Minuten im Hintergrund. Einstellen kannst du alles unter Einstellungen → Benachrichtigungen.</p>`)}
 
     ${abschnitt('Werte in der Detailansicht', `
       <p><b>Pulszonen:</b> wie lange du in welchem Pulsbereich warst, von Zone 1 (Aufwärmen) bis Zone 5 (Maximum).</p>

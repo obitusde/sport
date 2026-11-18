@@ -1,6 +1,6 @@
 /**
  * WebApp.gs – Schnittstelle für die App (JSON)
- * Version: 0.5.0 (2026-11-17)
+ * Version: 0.7.0 (2026-11-18)
  *
  * Aufruf: GET <webapp-url>?token=<WEBAPP_TOKEN>&aktion=<aktion>&...
  *
@@ -12,6 +12,7 @@
  * | status            | letzter Import, letzter Fehler, Anzahl Aktivitäten             |
  * | sammeln           | holt neue Aktivitäten von Garmin ins Sheet: {neu, proSportart} |
  * | details           | Zusatzwerte einer Aktivität (id): {id, details: {…}}            |
+ * | meldung           | Text einer Benachrichtigung (art, seit), siehe Meldungen.gs      |
  *
  * Jede Antwort ist JSON: {ok: true, version, …} oder {ok: false, fehler}.
  * Ohne gültiges Token liefert die Web-App keine Daten.
@@ -31,9 +32,12 @@
  *   Bewegungsminuten × persönlicher Faktor der Sportart. Der Faktor ist
  *   Summe Punkte / Summe Minuten aller Aktivitäten dieser Sportart mit echten Werten
  *   ab 2023 (ohne Werte für die Sportart: Faktor über alle Sportarten).
+ * Änderungen 0.7.0: Aktion „meldung“ für die Benachrichtigungen der Android-App.
+ *   Unrealistische Aktivitäten (meldungPlausibel_ in Meldungen.gs) bekommen keine
+ *   geschätzten Sportpunkte mehr, nur echte Intensitätsminuten.
  */
 
-const WEBAPP_VERSION = '0.5.0';
+const WEBAPP_VERSION = '0.7.0';
 const PUNKTE_AB_JAHR = 2023;
 const BLATT_KONFIGURATION = 'Konfiguration';
 
@@ -144,6 +148,8 @@ function aktionAusfuehren_(p) {
       return Object.assign(basis, { einstellungen: einstellungenLesen_() });
     case 'status':
       return Object.assign(basis, statusDaten_());
+    case 'meldung':
+      return Object.assign(basis, { meldung: meldung_(p) });
     case 'details':
       return Object.assign(basis, { id: String(p.id), details: detailsLesen_(p.id) });
     case 'sammeln': {
@@ -206,7 +212,8 @@ function aktivitaetenKompakt_() {
     let geschaetzt = false;
     if (jahr(z) >= PUNKTE_AB_JAHR) {
       pkt = echtePunkte(d);
-      if (pkt === null) {
+      const plausibel = meldungPlausibel_({ sportart: z[i.sportart], km: zahl(z[i.distanz_km]), min: zahl(z[i.dauer_min]) });
+      if (pkt === null && plausibel) {
         const faktor = faktoren[z[i.sportart]] !== undefined ? faktoren[z[i.sportart]] : faktoren.alle;
         const min = zahl(z[i.dauer_min]);
         if (faktor !== undefined && min) {

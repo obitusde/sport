@@ -1,6 +1,6 @@
 /**
  * app.js – Sport-App
- * Version: 0.6.0 (2026-11-17)
+ * Version: 0.7.0 (2026-11-18)
  *
  * Ansichten: Woche, Einstellungen.
  * Die App holt die Aktivitäten als Liste von der Apps-Script-Web-App und rechnet
@@ -24,10 +24,14 @@
  * Jahrestabelle in „Erfolge“ ersetzt durch klare Jahres-Abzeichen. Neue Ansicht „Form“
  * (form.js) mit relativen Werten, neue Erklär-Seite (hilfe.js). Zurück aus Detail und
  * Erklärungen führt in die vorherige Ansicht.
+ * Änderungen 0.7.0: Zusammenspiel mit der Android-App (window.SportApp): Verbindung wird an
+ * die App weitergegeben, Benachrichtigungen sind in den Einstellungen konfigurierbar
+ * (Erinnerung, Wochenrückblick, Erfolge, Test, Vorschau), Update-Prüfung. Im Browser
+ * zeigen die Einstellungen stattdessen den Link zur APK.
  */
 'use strict';
 
-const APP_VERSION = '0.6.0';
+const APP_VERSION = '0.7.0';
 
 const SPEICHER = {
   url: 'sport.url',
@@ -207,6 +211,7 @@ async function allesLaden() {
     zustand.webAppVersion = liste.version;
     schreiben(SPEICHER.daten, { spalten: liste.spalten, zeilen: liste.zeilen, stand: zustand.datenStand, version: liste.version });
     schreiben(SPEICHER.einstellungen, einst.einstellungen);
+    verbindungAnApp();
     schreiben(SPEICHER.status, status);
   } catch (e) {
     zustand.fehler = e.message;
@@ -251,6 +256,94 @@ function ausSpeicherLaden() {
   }
   zustand.einstellungen = Object.assign({ wochenzielLaeufe: 2, wochenzielPunkte: 150 }, lesen(SPEICHER.einstellungen, {}));
   zustand.status = lesen(SPEICHER.status, null);
+}
+
+// ---------------------------------------------------------------------------
+// Android-App (window.SportApp, nur in der APK vorhanden)
+// ---------------------------------------------------------------------------
+
+const APK_SEITE = 'https://github.com/obitusde/sport/releases/latest';
+const WOCHENTAGE = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
+
+function inApp() {
+  return typeof window.SportApp !== 'undefined';
+}
+
+/** Gibt Web-App-URL und Token an die Android-App weiter (für den Hintergrund-Job). */
+function verbindungAnApp() {
+  const v = verbindung();
+  if (inApp() && v.url && v.token) {
+    try { window.SportApp.verbindungSetzen(v.url, v.token); } catch (e) { /* ältere App-Version */ }
+  }
+}
+
+function appBenachrichtigungen() {
+  try {
+    return JSON.parse(window.SportApp.benachrichtigungenLesen());
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Liest die Formularfelder der Benachrichtigungen und speichert sie in der App. */
+function benachrichtigungenSpeichern() {
+  const k = appBenachrichtigungen() || {};
+  document.querySelectorAll('[data-nb]').forEach(feld => {
+    const [art, schluessel] = feld.dataset.nb.split('.');
+    k[art] = k[art] || {};
+    k[art][schluessel] = feld.type === 'checkbox' ? feld.checked : Number(feld.value);
+  });
+  const ok = window.SportApp.benachrichtigungenSetzen(JSON.stringify(k));
+  meldung(ok ? 'Benachrichtigungen gespeichert.' : 'Nicht gespeichert.');
+  zeichnen();
+}
+
+// Rückmeldungen der Android-App
+window.nativeMeldung = text => meldung(text);
+window.nativeGeaendert = () => zeichnen();
+
+function benachrichtigungenHtml() {
+  if (!inApp()) {
+    return `<h2>Benachrichtigungen</h2>
+    <section class="karte">
+      <p style="margin:0 0 10px">Benachrichtigungen gibt es in der Android-App.</p>
+      <a class="knopf haupt" href="${APK_SEITE}" target="_blank" rel="noopener">Android-App herunterladen</a>
+      <p class="leise klein-text">Auf der Seite die Datei „sport-….apk“ antippen und öffnen. Beim ersten Mal fragt Android, ob der Browser Apps installieren darf.</p>
+    </section>`;
+  }
+  const k = appBenachrichtigungen();
+  if (!k) return '';
+  let erlaubt = true;
+  try { erlaubt = window.SportApp.benachrichtigungenErlaubt(); } catch (e) { /* ältere App-Version */ }
+  const tagWahl = (art) => `<select data-nb="${art}.tag" aria-label="Wochentag">${WOCHENTAGE.map((t, i) =>
+    `<option value="${i + 1}" ${k[art].tag === i + 1 ? 'selected' : ''}>${t}</option>`).join('')}</select>`;
+  const stundeWahl = (art) => `<select data-nb="${art}.stunde" aria-label="Uhrzeit">${Array.from({ length: 24 }, (_, h) =>
+    `<option value="${h}" ${k[art].stunde === h ? 'selected' : ''}>${String(h).padStart(2, '0')}:00</option>`).join('')}</select>`;
+  const schalter = (art, titel, unter) => `<label class="schalter-zeile">
+      <span><b>${titel}</b><small>${unter}</small></span>
+      <input type="checkbox" data-nb="${art}.an" ${k[art].an ? 'checked' : ''}>
+    </label>`;
+
+  return `<h2>Benachrichtigungen</h2>
+  <section class="karte">
+    ${erlaubt ? '' : `<div class="hinweis-box">Benachrichtigungen sind für die App ausgeschaltet. <button class="knopf klein" data-aktion="nb-erlauben">Erlauben</button></div>`}
+    ${schalter('erinnerung', 'Erinnerung', 'Nur wenn ein Wochenziel noch offen ist')}
+    <div class="zeit-wahl ${k.erinnerung.an ? '' : 'aus'}">${tagWahl('erinnerung')} ${stundeWahl('erinnerung')}</div>
+    ${schalter('rueckblick', 'Wochenrückblick', 'Ziele, Serien, Vergleich mit deinem Schnitt')}
+    <div class="zeit-wahl ${k.rueckblick.an ? '' : 'aus'}">${tagWahl('rueckblick')} ${stundeWahl('rueckblick')}</div>
+    ${schalter('erfolge', 'Erfolge', 'Neue Bestzeiten, Bestmarken und Jahres-Abzeichen nach dem Import')}
+    <div class="knopfreihe" style="margin-top:12px">
+      <button class="knopf" data-aktion="nb-test">Test</button>
+      <button class="knopf" data-aktion="nb-vorschau" data-art="erinnerung">Vorschau Erinnerung</button>
+      <button class="knopf" data-aktion="nb-vorschau" data-art="rueckblick">Vorschau Rückblick</button>
+    </div>
+    <p class="leise klein-text">Die App prüft etwa alle 30 Minuten. Benachrichtigungen kommen deshalb bis zu einer halben Stunde nach der eingestellten Zeit. Am Montag bis Donnerstag fasst der Rückblick die vergangene Woche zusammen, sonst die laufende.</p>
+  </section>`;
+}
+
+function appVersionText() {
+  if (!inApp()) return 'Browser';
+  try { return 'Android ' + window.SportApp.appVersion(); } catch (e) { return 'Android'; }
 }
 
 // ---------------------------------------------------------------------------
@@ -926,6 +1019,8 @@ function ansichtEinstellungen() {
     ${zaehlerHtml(zielPunkte, 'punkte-minus', 'punkte-plus', 0, 1000, 'Sportpunkte pro Woche', 'Aktivziel, Schritte von 10 · Garmin/WHO: 150')}
   </section>
 
+  ${benachrichtigungenHtml()}
+
   <h2>Verbindung</h2>
   <section class="karte">
     <form id="verbindung-form" autocomplete="off">
@@ -947,10 +1042,12 @@ function ansichtEinstellungen() {
       <tr><td>Auf diesem Gerät geladen</td><td>${zeitpunkt(zustand.datenStand)}</td></tr>
       <tr><td>Letzter Garmin-Import</td><td>${st && st.letzterImport ? esc(st.letzterImport) + ' (' + st.letzterImportNeu + ' neu)' : '–'}</td></tr>
       ${st && st.letzterFehler ? `<tr><td>Letzter Fehler</td><td class="hinweis-fehler">${esc(st.letzterFehler)}</td></tr>` : ''}
-      <tr><td>Version App / Web-App</td><td>${APP_VERSION} / ${esc(zustand.webAppVersion || '–')}</td></tr>
+      <tr><td>Version Oberfläche / Web-App</td><td>${APP_VERSION} / ${esc(zustand.webAppVersion || '–')}</td></tr>
+      <tr><td>Läuft als</td><td>${esc(appVersionText())}</td></tr>
     </table>
     <div class="knopfreihe" style="margin-top:12px">
       <button class="knopf" data-aktion="von-garmin" ${zustand.laedt || !v.token ? 'disabled' : ''}>${zustand.laedt ? ladeText() : 'Von Garmin holen'}</button>
+      ${inApp() ? '<button class="knopf" data-aktion="app-update">Nach App-Update suchen</button>' : ''}
     </div>
     ${zustand.fehler ? `<p class="hinweis-fehler">${esc(zustand.fehler)}</p>` : ''}
   </section>`;
@@ -1219,6 +1316,10 @@ document.addEventListener('click', ereignis => {
   switch (ziel.dataset.aktion) {
     case 'detail': detailOeffnen(ziel.dataset.id); break;
     case 'zurueck': history.back(); break;
+    case 'nb-test': window.SportApp.testBenachrichtigung(); meldung('Test läuft …'); break;
+    case 'nb-vorschau': window.SportApp.vorschau(ziel.dataset.art); meldung('Vorschau wird geholt …'); break;
+    case 'nb-erlauben': window.SportApp.benachrichtigungenAnfragen(); break;
+    case 'app-update': window.SportApp.updatePruefen(); meldung('Suche nach Update …'); break;
     case 'hilfe': unterseiteOeffnen('hilfe', { hilfe: true }); zeichnen(); break;
     case 'woche-zurueck': zustand.wocheVersatz--; zeichnen(); break;
     case 'woche-vor': zustand.wocheVersatz = Math.min(0, zustand.wocheVersatz + 1); zeichnen(); break;
@@ -1238,6 +1339,11 @@ document.addEventListener('click', ereignis => {
       }
       break;
   }
+});
+
+// Benachrichtigungs-Einstellungen sofort speichern
+document.addEventListener('change', ereignis => {
+  if (ereignis.target.closest('[data-nb]') && inApp()) benachrichtigungenSpeichern();
 });
 
 document.addEventListener('submit', async ereignis => {
@@ -1277,6 +1383,7 @@ document.addEventListener('visibilitychange', () => {
 // ---------------------------------------------------------------------------
 
 ausSpeicherLaden();
+verbindungAnApp();
 if (!verbindung().token) zustand.ansicht = 'einstellungen';
 zeichnen();
 allesLaden();

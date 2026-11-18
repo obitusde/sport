@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- colors.xml (dunkel) – Sport-App, Version 0.7.0 (2026-11-18) -->
+<resources>
+    <color name="hintergrund">#16171A</color>
+    <color name="akzent">#FF7A50</color>
+</resources>

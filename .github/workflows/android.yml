@@ -1,0 +1,97 @@
+# android.yml – Android-App bauen und als Release veröffentlichen
+# Version: 0.7.0 (2026-11-18)
+#
+# Baut bei jeder Änderung in /android eine signierte APK und legt sie als GitHub-Release
+# mit dem Tag „apk-<Laufnummer>“ ab. Die Laufnummer ist der versionCode; die App
+# vergleicht ihn mit dem neuesten Release und bietet dann ein Update an.
+#
+# Benötigt (Repo → Settings → Secrets and variables → Actions → Secrets):
+#   ANDROID_KEYSTORE_B64       Signatur-Schlüssel (PKCS12, Alias „sport“) als Base64
+#   ANDROID_KEYSTORE_PASSWORT  Passwort des Schlüssels
+# Ohne gleichbleibenden Schlüssel lassen sich Updates nicht installieren. Fehlen die
+# Secrets, wird nur zur Probe gebaut (Debug-Signatur) und nichts veröffentlicht.
+
+name: Android-App bauen
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: android
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Repo auschecken
+        uses: actions/checkout@v4
+
+      - name: Voraussetzungen prüfen
+        id: pruefen
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          PW: ${{ secrets.ANDROID_KEYSTORE_PASSWORT }}
+        run: |
+          if [ -n "$KS" ] && [ -n "$PW" ]; then
+            echo "signiert=ja" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Secrets ANDROID_KEYSTORE_B64 / ANDROID_KEYSTORE_PASSWORT fehlen: nur Probe-Build, keine Veröffentlichung"
+            echo "signiert=nein" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Java einrichten
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Gradle einrichten
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Signatur-Schlüssel ablegen
+        if: steps.pruefen.outputs.signiert == 'ja'
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          umask 077
+          printf '%s' "$KS" | base64 -d > "$RUNNER_TEMP/sport.p12"
+
+      - name: APK bauen
+        env:
+          SIGNIERT: ${{ steps.pruefen.outputs.signiert }}
+          PW: ${{ secrets.ANDROID_KEYSTORE_PASSWORT }}
+        run: |
+          if [ "$SIGNIERT" = "ja" ]; then
+            export SPORT_KEYSTORE="$RUNNER_TEMP/sport.p12"
+            export SPORT_KEYSTORE_PASSWORT="$PW"
+          fi
+          gradle -p android assembleRelease -PversionCode=${{ github.run_number }} --no-daemon --stacktrace
+
+      - name: Release veröffentlichen
+        if: steps.pruefen.outputs.signiert == 'ja'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LAUF: ${{ github.run_number }}
+        run: |
+          VERSION=$(grep -oP 'val appVersion = "\K[^"]+' android/app/build.gradle.kts)
+          DATEI="sport-${VERSION}-${LAUF}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "$DATEI"
+          gh release create "apk-${LAUF}" "$DATEI" \
+            --title "Sport-App ${VERSION} (${LAUF})" \
+            --notes "Automatisch gebaut aus Commit ${GITHUB_SHA::7}. Installation: APK herunterladen und öffnen." \
+            --latest
+
+      - name: Schlüssel entfernen
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sport.p12"

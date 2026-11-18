@@ -1,6 +1,6 @@
 # PROJEKT.md – Sport-Tracker (Arbeitstitel „sport")
 
-Version: 0.6.0 (2026-11-17) – v0.6 Form (relative Werte) und Erklärungen gebaut
+Version: 0.7.0 (2026-11-18) – v0.7 Android-App (Hülle, Benachrichtigungen, Updates) gebaut
 
 Dieses Dokument ist die Grundlage für die Entwicklung mit Claude Code. Es beschreibt Ziele, Architektur, Arbeitsweise und Fahrplan. Claude Code liest es vor jeder Arbeit und hält es aktuell.
 
@@ -37,7 +37,12 @@ Epix / Tacho → Garmin Connect (unverändert)
      • liefert Liste, Wochenwerte, Spuren als JSON
                      ↓
    PWA auf GitHub Pages
-     • Ansichten: Woche · Verlauf · Karte · Liste
+     • Ansichten: Woche · Form · Erfolge · Einstellungen (+ Detail, Erklärungen)
+                     ↑ (eingebettet)
+   Android-App (APK, in GitHub gebaut, ab v0.7)
+     • zeigt die PWA im WebView, Brücke window.SportApp
+     • Hintergrund-Job ~30 min: Benachrichtigungen (Text von der Web-App), Update-Prüfung
+     • ab v0.8: Schrittzähler des Handys
 ```
 
 ### Bausteine
@@ -51,6 +56,7 @@ Epix / Tacho → Garmin Connect (unverändert)
 | Schnittstelle | Apps Script Web-App | JSON für die PWA, nur mit Web-App-Token |
 | Oberfläche | PWA auf GitHub Pages | Anzeige, offline-fähig (Service Worker) |
 | Karte | Leaflet + swisstopo- oder OSM-Kacheln | Spuren anzeigen, Heatmap-Effekt durch Überlagerung |
+| Android-App | Kotlin ohne Zusatzbibliotheken, WebView, JobScheduler, GitHub Action | Benachrichtigungen, Updates, (v0.8) Schritte |
 
 ### Garmin Connect Personal API (Stand November 2026)
 
@@ -127,6 +133,9 @@ Epix / Tacho → Garmin Connect (unverändert)
 - **Zwei Wochenziele mit eigener Serie:** Laufziel (Standard 2 Läufe) und Aktivziel (Standard 150 Sportpunkte, wie Garmin/WHO), beide in der App einstellbar.
 - **Gamification:** Abzeichen für Serien (4, 12, 26, 52 Wochen), Bestmarken (längster Lauf, schnellster 5er, meiste Höhenmeter an einem Tag), Jahres-km (500, 1000, 2000), Allrounder (3 Sportarten in einer Woche), Wochenbilanz („beste Woche seit …“).
 - **Fitness-Stand = Laufökonomie-Trend:** Tempo im Verhältnis zum Puls über Monate, als Diagramm im Verlauf, als kurze Zeile in der Wochenansicht. VO2max liefert die API nicht.
+- **Android-App als Hülle** (entschieden 2026-11-18): APK mit WebView um die bestehende PWA, damit die Oberfläche eine Codebasis bleibt und ohne neue APK aktualisiert wird. Nativ nur: Benachrichtigungen, Update-Prüfung, (v0.8) Schrittzähler. Gebaut von `.github/workflows/android.yml`; versionCode = Laufnummer der Action; Release-Tag `apk-<Laufnummer>`. Update-Prüfung über die GitHub-API (`releases/latest`), Installation per Download im Browser.
+- **Benachrichtigungen:** konfigurierbar in der App (Einstellungen): Erinnerung (Standard Do 18 Uhr, nur wenn ein Ziel offen ist), Wochenrückblick (Standard So 19 Uhr; Mo–Do über die Vorwoche), Erfolge (Bestzeiten, Bestmarken, Jahres-Abzeichen neuer Importe). Hintergrund-Job etwa alle 30 Minuten; Texte rechnet die Web-App (`gas/Meldungen.gs`), damit die Logik nicht in Kotlin doppelt steht.
+- **Keine geschätzten Sportpunkte für unrealistische Aktivitäten** (nur echte Intensitätsminuten), seit Web-App 0.7.0.
 - **App ohne Build-Schritt:** schlichtes HTML/CSS/JavaScript in `/docs`, GitHub Pages veröffentlicht direkt.
 - **Deployment per GitHub Action schon ab v0.1** (statt erst v0.2). Die Skript-ID steht als Repo-Variable `GAS_SCRIPT_ID`, die Action erzeugt daraus `gas/.clasp.json`. clasp-Version fest: `@google/clasp@3.4.1`.
 - **Diagnose-Protokolle ohne Werte:** Die Diagnose loggt standardmäßig nur Struktur und Zählungen (`WERTE_LOGGEN = false`), damit das Protokoll keine Aktivitätsdaten enthält.
@@ -147,6 +156,8 @@ Epix / Tacho → Garmin Connect (unverändert)
 | clasp-Zugang | einmalig eingerichtet | langfristig | GitHub-Secret `CLASPRC_JSON` |
 | Skript-ID | Apps-Script-Projekt | dauerhaft | GitHub-Variable `GAS_SCRIPT_ID` (kein Geheimnis) |
 | Web-App-Bereitstellung | erste Bereitstellung (ab v0.3) | dauerhaft | GitHub-Variable `GAS_DEPLOYMENT_ID` |
+| Android-Signatur-Schlüssel | von Claude in der Sitzung erzeugt (PKCS12, Alias `sport`), an Christof als Datei übergeben | 100 Jahre | GitHub-Secrets `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORT`; Sicherungskopie bei Christof. Ohne ihn keine Updates der installierten App |
+| Web-App-URL und Token in der Android-App | aus der Web-Oberfläche über die Brücke | bis zur Änderung | privater App-Speicher (SharedPreferences) |
 
 Regeln:
 - Kein Schlüssel und kein Token im Code, im Repo, in Logs oder in Commit-Nachrichten.
@@ -234,7 +245,8 @@ Laufband-Läufe zählen fürs Laufziel. Indoor-Fahrten zählen zu Rad, haben abe
 | `status` | `letzterImport`, `letzterImportNeu`, `letzterFehler`, `anzahlAktivitaeten` |
 | `sammeln` | startet den Sammler sofort (ohne Fehler-Mail), liefert `neu` und `proSportart`. Für den Knopf „Von Garmin holen“ |
 | `details` | Zusatzwerte einer Aktivität (`id`) aus der Spalte `details`: `{id, details: {…}}`, leeres Objekt, wenn nichts da ist |
-| `spuren`, `spur` | ab v0.7 |
+| `meldung` | Text einer Benachrichtigung: `art` = `test`, `erinnerung`, `rueckblick`, `erfolge` (mit `seit` in ms). `{meldung: {titel, text}}` oder `{meldung: null}` (`gas/Meldungen.gs`) |
+| `spuren`, `spur` | ab v0.9 |
 
 Antwort immer JSON: `{ok: true, version, …}` oder `{ok: false, fehler}`. Ohne gültiges Token: `{ok: false, fehler: "nicht berechtigt"}`.
 Die Web-App läuft als Christof („Ausführen als: Ich“) mit Zugriff „Jeder“; geschützt ist sie allein durch das Token.
@@ -252,6 +264,9 @@ Die Web-App läuft als Christof („Ausführen als: Ich“) mit Zugriff „Jeder
 /gas/Diagnose.gs                Diagnose der Garmin-API (nur Logs)
 /gas/Sammler.gs                 v0.2: Sammler, Sheet, Zeitgeber, Fehler-Mail
 /gas/WebApp.gs                  v0.3: Schnittstelle für die App (doGet)
+/gas/Meldungen.gs               v0.7: Texte für die Benachrichtigungen
+/android/                       Android-App (Kotlin): MainActivity (WebView), Bruecke, PruefJob, Pruefung, Melder, Update, Netz, Speicher
+/.github/workflows/android.yml  APK bauen, signieren, als Release „apk-<Laufnummer>“ veröffentlichen
 /docs/                          App auf GitHub Pages: index.html, app.js, form.js (Ansicht „Form“), hilfe.js (Erklärungen), style.css, sw.js, manifest.json, icons/
 /.github/workflows/deploy-gas.yml  Deployment nach Apps Script per clasp
 ```
@@ -306,6 +321,13 @@ Für v0.4 (Script-Editor):
 2. `detailsNachtragen` ausführen (ca. 30 s): füllt die neue Spalte `details` für alle Aktivitäten.
 3. In der App auf eine Aktivität tippen.
 
+Für v0.7 (Android-App):
+
+1. Datei `android-schluessel.txt` (von Claude) öffnen und die zwei Secrets in GitHub anlegen: `ANDROID_KEYSTORE_PASSWORT` und `ANDROID_KEYSTORE_B64`. Datei sicher aufbewahren.
+2. GitHub → Actions → „Android-App bauen“ → „Run workflow“. Danach gibt es unter Releases eine Datei `sport-0.7.0-<Nummer>.apk`.
+3. Am Handy https://github.com/obitusde/sport/releases/latest öffnen, APK herunterladen, öffnen, Installation aus dieser Quelle erlauben, installieren.
+4. App öffnen, Benachrichtigungen erlauben. Verbindung ist evtl. neu einzutragen (die App hat einen eigenen Speicher). Unter Einstellungen → Benachrichtigungen „Test“ tippen.
+
 Für v0.5: nichts einzurichten. Optional `webAppTesten` ausführen: loggt, wie viele Aktivitäten Sportpunkte haben, wie viele davon geschätzt sind, und die persönlichen Faktoren.
 
 ---
@@ -335,7 +357,9 @@ Für v0.5: nichts einzurichten. Optional `webAppTesten` ausführen: loggt, wie v
 | v0.4 | Detailansicht: Pace, Puls und Pulszonen, Trainingseffekt, Intensitätsminuten, Laufstil, schnellste Abschnitte. Spalte `details` mit Nachtrag, Diagnose der Intensitätsminuten | Mehr Einblick pro Aktivität |
 | v0.5 | Sportpunkte (Intensitätsminuten), Aktivziel 150 mit Serie, Abzeichen und Bestmarken | Motivation über alle Sportarten |
 | v0.6 | Form: relative Werte gegenüber dem eigenen Schnitt, Sportpunkte pro Woche, Laufökonomie, Jahr bis heute, aktive Stunden pro Jahr; Erklär-Seite; Filter für unrealistische Aktivitäten | Ziel 4, Fitness-Stand |
-| v0.7 | Karte mit allen Spuren, Filter nach Sportart und Jahr, Spuren der Historie nachladen | Ziel 5 |
+| v0.7 | Android-App: Hülle um die PWA, Benachrichtigungen (konfigurierbar), Updates über GitHub-Releases | Benachrichtigungen |
+| v0.8 | Schrittzähler des Handys: Diagnose, Blatt „Schritte“, Anzeige in Woche und Form | Bewegung im Alltag |
+| v0.9 | Karte mit allen Spuren, Filter nach Sportart und Jahr, Spuren der Historie nachladen | Ziel 5 |
 
 ### Ideen für später
 
@@ -360,6 +384,7 @@ Für v0.5: nichts einzurichten. Optional `webAppTesten` ausführen: loggt, wie v
 
 | Version | Datum | Änderung |
 |---|---|---|
+| 0.7.0 | 2026-11-18 | v0.7 Android-App: `android/` (Kotlin, WebView-Hülle, Brücke `SportApp`, Hintergrund-Job, Benachrichtigungen, Update-Prüfung) 0.7.0, `.github/workflows/android.yml` 0.7.0 (Probe-Build ohne Secrets, sonst signiertes Release). `gas/Meldungen.gs` 0.7.0 (Aktion `meldung`), `gas/WebApp.gs` 0.7.0 (keine Schätzpunkte für unrealistische Aktivitäten). Oberfläche 0.7.0: Benachrichtigungen in den Einstellungen (in der App) bzw. Download-Link (im Browser), Update-Knopf, Erklär-Seite ergänzt |
 | 0.6.0 | 2026-11-17 | v0.6 nach Feedback: unrealistische Aktivitäten werden erkannt und zählen nicht für km/Zeit/Bestmarken; Halbmarathon-Bestzeit entfernt; Jahrestabelle durch Jahres-Abzeichen fürs laufende Jahr ersetzt; neue Ansicht „Form“ (`docs/form.js` 0.6.0) mit Formstand, Vergleich je Kennzahl, Sportpunkte-Diagramm, Laufökonomie, Jahr bis heute, aktive Stunden pro Jahr; Erklär-Seite (`docs/hilfe.js` 0.6.0); Wochenansicht zeigt Anteil am eigenen Schnitt; Zurück führt in die vorherige Ansicht. App 0.6.0 (`app.js`, `style.css`, `sw.js`, `index.html`). Keine Änderung an Apps Script |
 | 0.5.0 | 2026-11-17 | v0.5 Sportpunkte und Erfolge: `gas/WebApp.gs` 0.5.0 (Sportpunkte ab 2023 mit Schätzung, schnellste Abschnitte in der Liste, Einstellung `wochenzielPunkte`, Standard 150), `gas/Diagnose.gs` 0.1.3 (`diagnoseZusatzwerte`). App 0.5.0: Aktivziel mit Serie in der Wochenansicht, Karte „Erfolge dieser Woche“ (Wochenbilanz, neue Abzeichen, Bestmarken, Jahres-km, Allrounder), Ansicht „Erfolge“ (Serien-Abzeichen 4/12/26/52, Bestzeiten, Bestmarken, Jahres-Kilometer, Allrounder), zweites Ziel in den Einstellungen, Sportpunkte in der Detailansicht, Trainingseffekt mit Garmins deutschen Begriffen, „Unknown“ ausgeblendet |
 | 0.4.0 | 2026-11-17 | v0.4 Detailansicht: `gas/Sammler.gs` 0.4.0 (Spalte `details`, `details_`, `detailsNachtragen`, Kopfzeile wird automatisch ergänzt), `gas/WebApp.gs` 0.4.0 (Aktion `details`), `gas/Diagnose.gs` 0.1.2 (`diagnoseDetails`), App 0.4.0 (`app.js`, `style.css`, `sw.js`). Entscheidungen zu Sportpunkten, zwei Zielen, Gamification und Fitness-Stand eingetragen, Fahrplan v0.4–v0.7 neu. Arbeitsregel „erst Feedback sammeln“. Rest des alten Schnittstellen-Entwurfs in Abschnitt 5 entfernt |

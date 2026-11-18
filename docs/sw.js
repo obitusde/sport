@@ -1,13 +1,13 @@
 /**
  * sw.js – Service Worker der Sport-App
- * Version: 0.6.0 (2026-11-17)
+ * Version: 0.7.0 (2026-11-18)
  *
  * Hält die App-Dateien für den Offline-Betrieb bereit.
  * Strategie: zuerst Netz (damit Updates sofort ankommen), sonst Cache.
  * Anfragen an die Web-App (andere Domain) werden nicht angefasst;
  * die Daten speichert app.js selbst im localStorage.
  */
-const CACHE = 'sport-0.6.0';
+const CACHE = 'sport-0.7.0';
 const DATEIEN = ['./', 'index.html', 'style.css', 'app.js', 'form.js', 'hilfe.js', 'manifest.json',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
 

@@ -1,7 +1,16 @@
-# .gitignore – Version 0.1.0 (2026-11-17)
+# .gitignore – Version 0.7.0 (2026-11-18)
 # Zugangsdaten und erzeugte Dateien nie ins Repo
 .clasprc.json
 gas/.clasp.json
 node_modules/
 *.fit
 *.zip
+# Android (ab 0.7.0)
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.p12
+*.jks
+*.keystore
+*.apk

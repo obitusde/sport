@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ic_launcher_hintergrund.xml – Sport-App, Version 0.7.0 (2026-11-18) -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#E4572E" />
+</shape>

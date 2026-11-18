@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- themes.xml – Sport-App, Version 0.7.0 (2026-11-18) -->
+<resources>
+    <style name="Thema" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/hintergrund</item>
+        <item name="android:colorAccent">@color/akzent</item>
+    </style>
+</resources>
