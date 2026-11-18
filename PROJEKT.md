@@ -1,6 +1,6 @@
 # PROJEKT.md – Sport-Tracker (Arbeitstitel „sport")
 
-Version: 0.14.1 (2026-11-18) – v0.14 Fotos aus dem Fotoschatz
+Version: 0.14.2 (2026-11-18) – v0.14 Fotos aus dem Fotoschatz
 
 Dieses Dokument ist die Grundlage für die Entwicklung mit Claude Code. Es beschreibt Ziele, Architektur, Arbeitsweise und Fahrplan. Claude Code liest es vor jeder Arbeit und hält es aktuell.
 
@@ -489,6 +489,7 @@ Für v0.5: nichts einzurichten. Optional `webAppTesten` ausführen: loggt, wie v
 
 | Version | Datum | Änderung |
 |---|---|---|
+| 0.14.2 | 2026-11-18 | Feedback: Vorschaubilder machten die Karte zu voll. Jetzt kleine Punkte (Kamera-Symbol bzw. Anzahl, weiß mit blauem Rand, Tippfläche 36 px); Antippen öffnet ein Vorschaufenster auf der Karte mit Blättern, Bild antippen = groß; Kamera-Knopf „Fotos an/aus“ auf Tour- und Detail-Karte, Wahl gespeichert (`sport.fotosKarte`). `docs/fotos.js`, `docs/karte.js`, `docs/touren.js`, `docs/style.css`, `docs/hilfe.js` 0.14.2 |
 | 0.14.1 | 2026-11-18 | Feedback: Foto-Marker auf der Karte als Vorschaubilder (36 px, Zahl bei mehreren) statt kleiner Punkte (`docs/fotos.js`, `docs/style.css`); Tour-Karte lädt die feinen Spuren (5 m) der Etappen nach, vorher grob und eckig (`docs/touren.js`, `docs/karte.js` mit `feineSpurHolen`). Die große Karte bleibt bei groben Spuren (alle Spuren auf einmal) |
 | 0.14.0 | 2026-11-18 | v0.14 Fotoschatz: `docs/fotos.js` (neu), `docs/touren.js`, `docs/karte.js` (Ebene „Fotos“), `docs/app.js` (Detail, Einstellungen, Betrachter), `docs/style.css`, `docs/hilfe.js`, `docs/sw.js`, `docs/index.html` 0.14.0; `android/` 0.14.0 (nur `/sport/` im WebView). Apps Script unverändert |
 | 0.13.0 | 2026-11-18 | v0.13: `docs/touren.js` 0.13.0 (neue Regeln: Übernachtung zu Hause beendet Tour, mindestens eine Übernachtung unterwegs, Lücke am Folgetag nur nach Übernachtung unterwegs, Entfernung ohne Lücken, Ferien-Standort; Orte unterwegs), `docs/daten/orte.txt` (neu, GeoNames), `docs/karte.js` 0.13.0 (Kartenwahl auf allen Karten, OSM außerhalb der Schweiz), `docs/app.js`, `docs/hilfe.js`, `docs/style.css`, `docs/sw.js`, `docs/index.html` 0.13.0. Apps Script und Android unverändert |

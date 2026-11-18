@@ -1,6 +1,6 @@
 /**
  * app.js – Sport-App
- * Version: 0.14.1 (2026-11-18)
+ * Version: 0.14.2 (2026-11-18)
  *
  * Ansichten: Woche, Einstellungen.
  * Die App holt die Aktivitäten als Liste von der Apps-Script-Web-App und rechnet
@@ -55,7 +55,7 @@
  */
 'use strict';
 
-const APP_VERSION = '0.14.1';
+const APP_VERSION = '0.14.2';
 
 const SPEICHER = {
   url: 'sport.url',

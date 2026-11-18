@@ -1,6 +1,6 @@
 /**
  * karte.js – Ansicht „Karte“ (Heatmap aller Spuren) und Spur in der Detailansicht
- * Version: 0.14.1 (2026-11-18)
+ * Version: 0.14.2 (2026-11-18)
  *
  * - Grundkarte: graue Landeskarte von swisstopo (WMTS, Web-Mercator), etwas blasser, damit
  *   die Spuren vorne stehen; umschaltbar auf die farbige Landeskarte oder OpenStreetMap.
@@ -28,7 +28,8 @@
  *   Tour-Karte; die Wahl gilt für alle Karten und bleibt gespeichert. Liegt eine Spur nicht
  *   ganz in der Schweiz, beginnen Detail- und Tour-Karte mit OpenStreetMap (swisstopo zeigt
  *   außerhalb nichts).
- * - Ab 0.14.0: Ebene „Fotos“ (Fotoschatz, fotos.js) auf Detail- und Tour-Karte.
+ * - Ab 0.14.0: Fotos (Fotoschatz, fotos.js) auf Detail- und Tour-Karte; ab 0.14.2 mit eigenem
+ *   Knopf „Fotos an/aus“ statt in der Ebenen-Auswahl.
  * - Ab 0.14.1: feineSpurHolen() für Detail- und Tour-Karte (die Tour-Karte zeigt zuerst die
  *   groben und ersetzt sie durch die feinen Spuren).
  * - Die Spuren werden beim Öffnen der Karte neu geladen (zuerst aus dem Cache gezeigt).
@@ -164,7 +165,7 @@ function inDerSchweiz(grenzen) {
  * Grundkarten (grau, farbig, OSM) und Wanderwege mit Auswahl oben rechts. Die Wahl wird für
  * alle Karten gespeichert. deckkraft: wie stark die Landeskarte grau erscheint.
  */
-function kartenEbenen(karte, start, deckkraft, fotoEbeneZusatz) {
+function kartenEbenen(karte, start, deckkraft) {
   const grundkarten = {
     grau: kachelEbene(KACHELN.swisstopoGrau, { opacity: deckkraft || 0.6, attribution: '© swisstopo' }),
     farbe: kachelEbene(KACHELN.swisstopo, { opacity: 0.75, attribution: '© swisstopo' }),
@@ -174,7 +175,6 @@ function kartenEbenen(karte, start, deckkraft, fotoEbeneZusatz) {
   (grundkarten[start] || grundkarten.grau).addTo(karte);
   if (karteZustand.wanderwege) wanderwege.addTo(karte);
   const zusatz = { 'Wanderwege (Schweiz)': wanderwege };
-  if (fotoEbeneZusatz) zusatz.Fotos = fotoEbeneZusatz;
   L.control.layers({
     'Landeskarte grau': grundkarten.grau, 'Landeskarte farbig': grundkarten.farbe, 'OpenStreetMap': grundkarten.osm
   }, zusatz).addTo(karte);
@@ -680,10 +680,9 @@ async function detailKarteNachZeichnen(id) {
     if (!teile.length) return;
     const karte = L.map(flaeche, { scrollWheelZoom: false, maxZoom: 19 });
     karteZustand.detailKarte = karte;
-    const fotos = fotosZustand.fotos ? fotoEbene(karte, aktivitaetFotos(a)) : null;
-    kartenEbenen(karte, inDerSchweiz(L.latLngBounds([].concat(...teile))) ? karteZustand.grundkarte : 'osm', 0.7, fotos);
-    if (fotos) fotos.addTo(karte);
+    kartenEbenen(karte, inDerSchweiz(L.latLngBounds([].concat(...teile))) ? karteZustand.grundkarte : 'osm', 0.7);
     vollbildKnopf('detail').addTo(karte);
+    if (fotosZustand.fotos) fotoEbene(karte, aktivitaetFotos(a));
     L.polyline(teile, { color: '#fff', weight: 8, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }).addTo(karte);
     const linie = L.polyline(teile, { color: LINIEN_FARBE[a.sportart] || LINIEN_FARBE.wandern, weight: 4.5, opacity: 1, lineCap: 'round', lineJoin: 'round' }).addTo(karte);
     const start = teile[0][0];

@@ -1,6 +1,6 @@
 /**
  * touren.js – Mehrtagestouren erkennen und anzeigen
- * Version: 0.14.1 (2026-11-18)
+ * Version: 0.14.2 (2026-11-18)
  *
  * Erkennung (entschieden mit Christof 2026-11-18), nur Wandern oder nur Rad pro Tour:
  * - Etappe = Aktivität von A nach B. Die nächste Etappe beginnt höchstens TOUR_ANSCHLUSS_KM
@@ -566,10 +566,9 @@ async function tourKarteNachZeichnen() {
     const s = spurProId.get(tt.x.a.id);
     if (s && s.teile) s.teile.forEach(teil => alleGrenzen.extend(L.latLngBounds(teil)));
   });
-  const fotos = fotosZustand.fotos ? fotoEbene(karte, tourFotos(t)) : null;
-  kartenEbenen(karte, inDerSchweiz(alleGrenzen) ? karteZustand.grundkarte : 'osm', 0.7, fotos);
-  if (fotos) fotos.addTo(karte);
+  kartenEbenen(karte, inDerSchweiz(alleGrenzen) ? karteZustand.grundkarte : 'osm', 0.7);
   vollbildKnopf('tour').addTo(karte);
+  if (fotosZustand.fotos) fotoEbene(karte, tourFotos(t));
   const grenzen = L.latLngBounds([]);
   const feineLinien = [];
   const ersterTag = t.teile[0].x.tag;

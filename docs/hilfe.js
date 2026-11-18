@@ -1,6 +1,6 @@
 /**
  * hilfe.js – Erklär-Seite „So funktioniert die App“
- * Version: 0.14.0 (2026-11-18)
+ * Version: 0.14.2 (2026-11-18)
  *
  * Erreichbar über das „?“ in „Form“ und „Erfolge“ sowie über die Einstellungen.
  * Werte wie Ziele und Grenzen werden aus app.js gelesen, damit der Text stimmt,
@@ -115,7 +115,7 @@ function ansichtHilfe() {
       <p><b>Korrigieren:</b> Auf der Tour-Seite umbenennen, mit „×“ eine Aktivität herausnehmen oder die ganze Tour auflösen. Fehlt eine Aktivität, öffne sie und tippe auf „Zu Tour hinzufügen“. Die Korrekturen gelten auf allen Geräten.</p>`)}
 
     ${abschnitt('Fotos aus dem Fotoschatz', `
-      <p>Ist der Fotoschatz verbunden (Optionen → Fotoschatz), zeigt die App Fotos aus dem Zeitraum einer Tour bzw. während einer Aktivität: als schmalen Bildstreifen unter der Karte und als kleine Punkte auf der Karte (über das Ebenen-Symbol oben rechts abschaltbar). Antippen öffnet das Foto groß, Wischen blättert, „Fotoschatz“ öffnet es dort.</p>
+      <p>Ist der Fotoschatz verbunden (Optionen → Fotoschatz), zeigt die App Fotos aus dem Zeitraum einer Tour bzw. während einer Aktivität: als schmalen Bildstreifen unter der Karte und als kleine Punkte mit Kamera-Symbol (bzw. Anzahl) auf der Karte. Ein Punkt öffnet ein Vorschaufenster auf der Karte, bei mehreren Fotos mit ‹ › zum Blättern; × oder Tippen daneben schließt es, Tippen aufs Bild zeigt es groß. Der Kamera-Knopf links auf der Karte blendet die Fotos ein und aus. Im großen Bild blättert Wischen, „Fotoschatz“ öffnet es dort.</p>
       <p>Der Fotoschatz-Link wird nur auf diesem Gerät gespeichert. Im Browser lässt er sich aus dem Fotoschatz übernehmen, in der Android-App wird er einmal eingefügt. Das Verzeichnis der Fotos lädt die App höchstens einmal am Tag neu.</p>`)}
 
     ${abschnitt('Mit Garmin abgleichen', `

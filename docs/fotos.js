@@ -1,6 +1,6 @@
 /**
  * fotos.js – Fotos aus dem Fotoschatz in Touren und Aktivitäten
- * Version: 0.14.1 (2026-11-18)
+ * Version: 0.14.2 (2026-11-18)
  *
  * Der Fotoschatz (eigene App, obitusde/fotoschatz) legt Bilder und ein Inhaltsverzeichnis
  * index-<Schlüssel>.json in Cloudflare R2 ab. Jedes Foto hat Aufnahmezeit (t, lokal), Ordner
@@ -14,8 +14,11 @@
  * obitusde.github.io, Schlüssel „fotoschatz.links“), in der Android-App wird er eingefügt.
  * Das Verzeichnis (einige MB) liegt im Cache „sport-daten“ und wird höchstens einmal am Tag
  * neu geladen. Die öffentliche R2-Adresse ist kein Geheimnis (siehe Fotoschatz CLAUDE.md).
- * Änderungen 0.14.1: Auf der Karte Vorschaubilder (36 px, weißer Rand, Zahl bei mehreren)
- * statt kleiner Punkte – vorher kaum zu sehen und schwer anzutippen.
+ * Änderungen 0.14.1: Auf der Karte Vorschaubilder statt kleiner Punkte.
+ * Änderungen 0.14.2 (Feedback: Vorschaubilder machen die Karte zu voll): Punkte mit
+ *   Kamera-Symbol bzw. Anzahl (weiß, blauer Rand, große Tippfläche); Antippen öffnet ein
+ *   Vorschaufenster auf der Karte (blättern bei mehreren, Bild antippen = groß), schließen
+ *   mit × oder Tippen daneben. Kamera-Knopf „Fotos an/aus“ auf der Karte, Wahl gespeichert.
  * Link in den Fotoschatz: …/fotoschatz/?f=<Ordner>&b=<Bild-id>#<Link>. Ältere
  * Fotoschatz-Fassungen ignorieren ?f und ?b und öffnen die Ordnerliste.
  */
@@ -28,7 +31,9 @@ const FOTOS_SPEICHER = 'sport.fotoschatz';
 const FOTOS_STAND = 'sport.fotoschatz.stand';
 const FOTOS_CACHE_DATEI = 'fotoschatz-index.json';
 const FOTOS_ALTER_MS = 24 * 60 * 60 * 1000;
-const FOTO_PUNKT_RASTER = 64; // Pixel: Fotos näher beisammen werden ein Vorschaubild mit Zahl
+const FOTO_PUNKT_RASTER = 48; // Pixel: Fotos näher beisammen werden ein Punkt mit Zahl
+const FOTOS_AUF_KARTE = 'sport.fotosKarte';
+const SYMBOL_KAMERA = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>';
 
 const fotosZustand = {
   fotos: null,        // [{t: Date, id, h, f, la, lo, de, ort}] nach Zeit sortiert
@@ -207,11 +212,18 @@ function fotosHtml(fotos, tagNull) {
   return html;
 }
 
-/** Fotos als kleine, zusammengefasste Punkte auf einer Leaflet-Karte (abschaltbare Ebene). */
+function fotosAufKarteAn() {
+  try { return localStorage.getItem(FOTOS_AUF_KARTE) !== '0'; } catch (e) { return true; }
+}
+
+/**
+ * Fotos als zusammengefasste Punkte auf einer Leaflet-Karte, dazu der Kamera-Knopf
+ * „Fotos an/aus“. Antippen öffnet ein Vorschaufenster auf der Karte.
+ */
 function fotoEbene(karte, fotos) {
   const mitGps = fotos.map((p, i) => ({ p, i })).filter(x => x.p.la !== null && x.p.lo !== null);
-  const ebene = L.layerGroup();
   if (!mitGps.length) return null;
+  const ebene = L.layerGroup();
   const zeichnenFotos = () => {
     ebene.clearLayers();
     const gruppen = new Map();
@@ -225,20 +237,66 @@ function fotoEbene(karte, fotos) {
       const la = liste.reduce((s, x) => s + x.p.la, 0) / liste.length;
       const lo = liste.reduce((s, x) => s + x.p.lo, 0) / liste.length;
       const n = liste.length;
-      const erstes = liste[0].p;
       L.marker([la, lo], {
-        icon: L.divIcon({
-          className: 'foto-punkt',
-          html: `<span class="foto-vorschau" style="background-image:url('${esc(fotoThumb(erstes))}')"></span>${n > 1 ? `<b class="foto-zahl">${n}</b>` : ''}`,
-          iconSize: [36, 36]
-        }),
+        icon: L.divIcon({ className: 'foto-punkt', html: `<span class="foto-kreis">${n > 1 ? n : SYMBOL_KAMERA}</span>`, iconSize: [36, 36] }),
         keyboard: false, riseOnHover: true, title: n > 1 ? n + ' Fotos' : 'Foto'
-      }).on('click', () => fotoBetrachter(fotos, liste[0].i)).addTo(ebene);
+      }).on('click', () => fotoVorschau(karte, [la, lo], fotos, liste.map(x => x.i), 0)).addTo(ebene);
     });
   };
   karte.whenReady(zeichnenFotos); // erst wenn die Karte einen Ausschnitt hat
   karte.on('zoomend', zeichnenFotos);
+  if (fotosAufKarteAn()) ebene.addTo(karte);
+
+  // Kamera-Knopf
+  const Knopf = L.Control.extend({
+    options: { position: 'topleft' },
+    onAdd() {
+      const rahmen = L.DomUtil.create('div', 'leaflet-bar');
+      const knopf = L.DomUtil.create('a', 'foto-knopf', rahmen);
+      const setzen = () => {
+        const an = karte.hasLayer(ebene);
+        knopf.classList.toggle('an', an);
+        knopf.title = an ? 'Fotos ausblenden' : 'Fotos einblenden';
+        knopf.setAttribute('aria-label', knopf.title);
+        knopf.setAttribute('aria-pressed', String(an));
+      };
+      knopf.href = '#';
+      knopf.setAttribute('role', 'button');
+      knopf.innerHTML = SYMBOL_KAMERA;
+      setzen();
+      L.DomEvent.disableClickPropagation(rahmen);
+      L.DomEvent.on(knopf, 'click', ev => {
+        L.DomEvent.stop(ev);
+        const an = !karte.hasLayer(ebene);
+        if (an) ebene.addTo(karte); else { karte.removeLayer(ebene); karte.closePopup(); }
+        try { localStorage.setItem(FOTOS_AUF_KARTE, an ? '1' : '0'); } catch (e) { /* egal */ }
+        setzen();
+      });
+      return rahmen;
+    }
+  });
+  new Knopf().addTo(karte);
   return ebene;
+}
+
+/** Vorschaufenster auf der Karte: ein Bild, bei mehreren mit Blättern. */
+function fotoVorschau(karte, ort, fotos, nummern, pos) {
+  const p = fotos[nummern[pos]];
+  const zeit = p.t.getDate() + '. ' + MONATE[p.t.getMonth()] + ' ' + p.t.getFullYear() + ', ' + uhrzeit(p.t);
+  const inhalt = document.createElement('div');
+  inhalt.className = 'foto-popup';
+  inhalt.innerHTML = `<button type="button" class="foto-popup-bild" aria-label="Foto groß anzeigen"><img src="${esc(fotoThumb(p))}" alt="${esc(p.de)}"></button>
+    <div class="foto-popup-zeile">
+      ${nummern.length > 1 ? `<button type="button" class="foto-popup-pfeil" data-r="-1" ${pos === 0 ? 'disabled' : ''} aria-label="Vorheriges">‹</button>` : ''}
+      <span>${nummern.length > 1 ? (pos + 1) + ' / ' + nummern.length + ' · ' : ''}${esc(zeit)}</span>
+      ${nummern.length > 1 ? `<button type="button" class="foto-popup-pfeil" data-r="1" ${pos === nummern.length - 1 ? 'disabled' : ''} aria-label="Nächstes">›</button>` : ''}
+    </div>`;
+  inhalt.querySelector('.foto-popup-bild').addEventListener('click', () => fotoBetrachter(nummern.map(i => fotos[i]), pos));
+  inhalt.querySelectorAll('.foto-popup-pfeil').forEach(b => b.addEventListener('click', ev => {
+    ev.stopPropagation();
+    fotoVorschau(karte, ort, fotos, nummern, pos + Number(b.dataset.r));
+  }));
+  L.popup({ maxWidth: 240, minWidth: 200, autoPanPadding: [16, 16], className: 'foto-popup-rahmen' }).setLatLng(ort).setContent(inhalt).openOn(karte);
 }
 
 function fotoBetrachter(liste, nr) {
