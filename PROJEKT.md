@@ -1,6 +1,6 @@
 # PROJEKT.md – Sport-Tracker (Arbeitstitel „sport")
 
-Version: 0.10.0 (2026-11-18) – v0.10 Karte überarbeitet, Abgleich mit Garmin, persönliche Jahres-Abzeichen
+Version: 0.10.1 (2026-11-18) – v0.10 Karte überarbeitet, Abgleich mit Garmin, persönliche Jahres-Abzeichen
 
 Dieses Dokument ist die Grundlage für die Entwicklung mit Claude Code. Es beschreibt Ziele, Architektur, Arbeitsweise und Fahrplan. Claude Code liest es vor jeder Arbeit und hält es aktuell.
 
@@ -452,6 +452,7 @@ Für v0.5: nichts einzurichten. Optional `webAppTesten` ausführen: loggt, wie v
 
 | Version | Datum | Änderung |
 |---|---|---|
+| 0.10.1 | 2026-11-18 | `gas/Spuren.gs` 0.10.1: `diagnoseSpurFilter` meldete bei 40 von 40 Spuren „keine“; die Diagnose loggt jetzt den Grund (HTTP, Größe, ZIP, FIT gefunden, Lesefehler, Filter). Schutz: Gute vorhandene Spuren werden nicht durch ein Ergebnis ohne Spur ersetzt, nach 5 solchen Fällen hintereinander bricht das Nachladen ab |
 | 0.10.0 | 2026-11-18 | v0.10: `gas/Spuren.gs` 0.10.0 (Spur-Filter für Zug und GPS-Sprünge, Zeitstempel aus FIT, Spalten `version` und `entfernt_km`, Neuberechnung älterer Spuren, `diagnoseSpurFilter`), `gas/Abgleich.gs` 0.10.0 (neu, `diagnoseAbgleich`), `gas/WebApp.gs` 0.10.0 (Aktion `abgleich`), `gas/Meldungen.gs` 0.10.0 (persönliche Jahres-Abzeichen), `gas/Sammler.gs` 0.10.0 (nur Kommentare). Oberfläche 0.10.0: `docs/karte.js` (Heatmap nach Häufigkeit, Sichtbarkeit, Vollbild, Neuladen), `docs/app.js` (Jahres-Abzeichen, Abgleich, Einstellungen, Detail-Karte oben), `docs/style.css`, `docs/hilfe.js`, `docs/sw.js`, `docs/index.html`. Android unverändert (0.9.0) |
 | 0.9.0 | 2026-11-18 | v0.9: Alltagspunkte (`gas/Schritte.gs` 0.9.0 mit Schrittabschnitten und Abzug während Aktivitäten, `gas/WebApp.gs` 0.9.0 mit `doPost`, Einstellungen `alltagPunkte`/`alltagFrei`/`alltagProPunkt`, Aktionen `spuren`/`spur`; `gas/Meldungen.gs` 0.9.0 Punkte inkl. Alltag). Spuren (`gas/Spuren.gs` 0.9.0 neu, `gas/Sammler.gs` 0.9.0 lädt Spuren neuer Aktivitäten). Android 0.9.0 (Messabschnitte, Übertragung per POST). Oberfläche 0.9.0: Karte (`docs/karte.js` neu), Spur in der Detailansicht, Alltagspunkte in Woche/Form/Einstellungen, Erklär-Seite. Entscheidung: Spuren im Sheet statt Drive. Umgebung der Cloud-Sitzung: freier Internetzugang auf Wunsch von Christof |
 | 0.8.0 | 2026-11-18 | v0.8 Schrittzähler: `android/` 0.8.0 (`Schritte.kt` neu, Berechtigung ACTIVITY_RECOGNITION, Lesen im Job und beim Öffnen, Übertragung, Diagnose über die Brücke), `gas/Schritte.gs` 0.8.0 (neu), `gas/WebApp.gs` 0.8.0, `gas/Meldungen.gs` 0.8.0 (Schritte im Rückblick). Oberfläche 0.8.0: Schritte pro Tag in der Tagesleiste, Karte „Schritte“, Vergleich unter „Form“, Einstellungen „Schrittzähler“, Erklär-Seite |

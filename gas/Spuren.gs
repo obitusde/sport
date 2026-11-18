@@ -1,6 +1,6 @@
 /**
  * Spuren.gs – GPS-Spuren für die Karte (Heatmap) und die Detailansicht
- * Version: 0.10.0 (2026-11-18)
+ * Version: 0.10.1 (2026-11-18)
  *
  * Quelle: Originaldatei der Aktivität (ZIP mit FIT), Garmin-Endpunkt
  * /download-service/files/activity/{id} mit „Accept: *\/*“ (siehe Diagnose 0.1.1).
@@ -29,6 +29,11 @@
  *   Spuren mit älterer Version gelten als offen und werden vom Zeitgeber neu berechnet.
  *   Neue Diagnose: diagnoseSpurFilter() lädt die neuesten Spuren und loggt nur, was der
  *   Filter entfernen würde.
+ * Änderungen 0.10.1: Die Diagnose meldete bei allen Spuren „keine“. diagnoseSpurFilter
+ *   loggt jetzt den Grund (HTTP, Dateigröße, FIT gefunden, Punkte, Zeitstempel, Lesefehler,
+ *   was der Filter entfernt). Schutz: Eine vorhandene gute Spur wird nicht mehr durch ein
+ *   Ergebnis ohne Spur ersetzt; liefern 5 solche Spuren hintereinander nichts, bricht das
+ *   Nachladen ab (dann stimmt beim Abruf vermutlich etwas nicht).
  */
 
 const BLATT_SPUREN = 'Spuren';
@@ -83,7 +88,9 @@ function diagnoseSpurFilter(anzahl) {
   kandidaten.forEach(function (k, n) {
     const s = spurLaden_(k.id, k.sportart);
     if (s.status !== 'ok') {
-      log_((n + 1) + '. ' + k.sportart + ': Status ' + s.status);
+      log_((n + 1) + '. ' + k.sportart + ': Status ' + s.status + ' – ' + (s.grund || '') +
+        (s.punkte ? ', ' + s.punkte + ' Punkte, mit Zeit ' + s.mitZeit + ', ' + s.teile + ' Teile, Sprünge ' + s.spruenge +
+          ', zu schnell ' + runden_(s.schnellKm || 0, 1) + ' km' : ''));
       return;
     }
     if (!s.mitZeit) ohneZeit++;
@@ -107,6 +114,11 @@ function spurenNachladen(sekunden, maxAnzahl) {
   const puffer = [];
   let verarbeitet = 0;
   let abbruch = '';
+  let ohneSpurFolge = 0;
+  const altStatus = {};
+  if (b.getLastRow() >= 2) {
+    b.getRange(2, 4, b.getLastRow() - 1, 1).getValues().forEach(function (z, n) { altStatus[n + 2] = z[0]; });
+  }
   for (let i = 0; i < kandidaten.length; i++) {
     if (Date.now() - t0 > budget || (maxAnzahl && verarbeitet >= maxAnzahl)) break;
     const k = kandidaten[i];
@@ -115,9 +127,20 @@ function spurenNachladen(sekunden, maxAnzahl) {
       abbruch = 'Ratenlimit von Garmin erreicht';
       break;
     }
+    // Hatte die Aktivität schon eine gute Spur und liefert jetzt keine mehr, stimmt eher
+    // beim Abruf etwas nicht. Nach 5 solchen Fällen hintereinander abbrechen.
+    const warGut = k.zeile && altStatus[k.zeile] === 'ok';
+    ohneSpurFolge = (s.status !== 'ok' && warGut) ? ohneSpurFolge + 1 : 0;
+    if (ohneSpurFolge >= 5) {
+      abbruch = '5 vorhandene Spuren hintereinander ohne neues Ergebnis (letzte: ' + (s.grund || s.status) + ')';
+      break;
+    }
     const werte = [k.id, k.sportart, k.start, s.status, s.punkte, s.grob, s.fein, new Date(), SPUR_VERSION,
       s.status === 'ok' ? runden_(s.entferntKm, 2) : ''];
-    if (k.zeile) {
+    if (warGut && s.status !== 'ok') {
+      // Gute ältere Spur behalten; nur als bearbeitet markieren
+      b.getRange(k.zeile, 8, 1, 2).setValues([[new Date(), SPUR_VERSION]]);
+    } else if (k.zeile) {
       b.getRange(k.zeile, 1, 1, SPUREN_SPALTEN.length).setValues([werte]); // ältere Version ersetzen
     } else {
       puffer.push(werte);
@@ -261,25 +284,36 @@ function spurLaden_(id, sportart) {
     return leer('fehler netz');
   }
   if (antwort.getResponseCode() !== 200) return leer('fehler ' + antwort.getResponseCode());
+  const grund = ['HTTP 200, ' + antwort.getBlob().getBytes().length + ' Byte, Typ ' + (antwort.getBlob().getContentType() || '?')];
   let dateien;
   try {
     const blob = antwort.getBlob().setContentType('application/zip');
     dateien = Utilities.unzip(blob);
+    grund.push(dateien.length + ' Datei(en) im ZIP');
   } catch (e) {
     dateien = [antwort.getBlob()];
+    grund.push('kein ZIP');
   }
   let punkte = [];
+  let fitGefunden = 0;
   dateien.forEach(function (d) {
     const bytes = d.getBytes();
     if (!punkte.length && bytes.length > 12 && bytes[8] === 0x2e && bytes[9] === 0x46 && bytes[10] === 0x49 && bytes[11] === 0x54) {
+      fitGefunden++;
       try {
         punkte = fitPunkte_(bytes);
       } catch (e) {
+        grund.push('Lesefehler: ' + e.message);
         punkte = [];
       }
     }
   });
-  if (punkte.length < 2) return leer('keine', punkte.length);
+  grund.push(fitGefunden ? 'FIT gefunden' : 'keine FIT-Datei');
+  if (punkte.length < 2) {
+    const r = leer('keine', punkte.length);
+    r.grund = grund.join(', ');
+    return r;
+  }
   const f = spurFiltern_(punkte, sportart);
   const ergebnis = {
     status: 'ok', punkte: punkte.length, grob: '', fein: '', teile: f.teile.length,
@@ -287,6 +321,7 @@ function spurLaden_(id, sportart) {
   };
   if (!f.teile.length) {
     ergebnis.status = 'keine';
+    ergebnis.grund = grund.join(', ') + ', Filter hat alles entfernt';
     return ergebnis;
   }
   const kodieren = function (toleranz) {
