@@ -1,6 +1,6 @@
 # PROJEKT.md – Sport-Tracker (Arbeitstitel „sport")
 
-Version: 0.13.0 (2026-11-18) – v0.13 Tour-Regeln nach echten Beispielen, Orte unterwegs, Kartenwahl
+Version: 0.14.0 (2026-11-18) – v0.14 Fotos aus dem Fotoschatz
 
 Dieses Dokument ist die Grundlage für die Entwicklung mit Claude Code. Es beschreibt Ziele, Architektur, Arbeitsweise und Fahrplan. Claude Code liest es vor jeder Arbeit und hält es aktuell.
 
@@ -147,7 +147,7 @@ Epix / Tacho → Garmin Connect (unverändert)
 - **Tour-Regeln ab v0.13** (Feedback 2026-11-18 mit echten Fällen: Lugano → Melide und Avignon → Aix richtig; Ferien in Albenga mit Sprung nach Aosta und Tagesausflüge ab Zuhause falsch): Übernachtung an einem häufigen Ort beendet die Tour; mindestens eine Übernachtung unterwegs; Lücke am nächsten Tag nur nach einer Übernachtung unterwegs; 20 km Entfernung am Stück ohne Lücken; mehr als zwei Nächte am selben Ort = Ferien-Standort.
 - **Orte unterwegs** (v0.13): Ortsliste `docs/daten/orte.txt` aus GeoNames cities1000 (CC BY 4.0): Schweiz/Liechtenstein ab 1000, IT/FR/DE/AT ab 3000, übriges Europa ab 10 000, Welt ab 100 000 Einwohnern (ca. 22 000 Orte, 330 KB gezippt), wird erst auf Tour-Seiten geladen. Kein Online-Dienst, die Spuren verlassen das Gerät nicht. Etappe „Start → Ziel, über …“ (bis 3 größte Orte im Umkreis von 1,5 km der Spur, ohne Orte bis 3 km um Start und Ziel); Tour „über …“ (5 größte Orte); automatischer Name aus erstem und letztem Punkt.
 - **Kartenwahl** (v0.13): grau / farbig / OpenStreetMap auf allen Karten, gespeichert im Gerät (`sport.grundkarte`); Detail- und Tour-Karte beginnen außerhalb der Schweiz mit OpenStreetMap.
-- **Fotoschatz-Verknüpfung** (Idee 2026-11-18, noch nicht entschieden): Tour-Seite mit Fotos aus dem Zeitraum (aus dem `index-<Schlüssel>.json` des Fotoschatz, gleiche Herkunft `obitusde.github.io`), Fotopunkte auf der Tour-Karte, Link in den Fotoschatz. Ordner-Links fehlen dort noch.
+- **Fotoschatz-Verknüpfung** (entschieden 2026-11-18, v0.14, `docs/fotos.js`): Fotos aus dem Zeitraum einer Tour (1 h vor bis 3 h nach) bzw. einer Aktivität (±15 min) als Bildstreifen und als dezente, zusammengefasste Punkte auf der Karte (Ebene „Fotos“, abschaltbar), Betrachter mit Blättern, Link in den Fotoschatz. Quelle: `index-<Schlüssel>.json` aus R2 mit Christofs Fotoschatz-Link; der Link liegt nur im Gerät (`sport.fotoschatz`), im Browser übernehmbar aus `fotoschatz.links` (gleiche Herkunft), in der APK eingefügt. Verzeichnis im Cache, höchstens täglich neu. Link-Format `…/fotoschatz/?f=<Ordner>&b=<Bild-id>#<Link>`; die Auswertung von `f`/`b` muss im Fotoschatz-Repo gebaut werden (Prompt an Christof übergeben, diese Sitzung hat dort keinen Schreibzugriff). Android 0.14.0: Im WebView bleibt nur `/sport/`, der Fotoschatz öffnet im Browser.
 - **Bestmarke Höhenmeter ohne Pistenski** (Garmin zählt die Liftfahrten mit), Skitouren zählen.
 - **Keine geschätzten Sportpunkte für unrealistische Aktivitäten** (nur echte Intensitätsminuten), seit Web-App 0.7.0.
 - **App ohne Build-Schritt:** schlichtes HTML/CSS/JavaScript in `/docs`, GitHub Pages veröffentlicht direkt.
@@ -335,7 +335,7 @@ Die Web-App läuft als Christof („Ausführen als: Ich“) mit Zugriff „Jeder
 /gas/Touren.gs                  v0.12: Korrekturen an den Mehrtagestouren (Blatt „Touren“)
 /android/                       Android-App (Kotlin): MainActivity (WebView), Bruecke, PruefJob, Pruefung, Melder, Update, Netz, Speicher, Schritte
 /.github/workflows/android.yml  APK bauen, signieren, als Release „apk-<Laufnummer>“ veröffentlichen
-/docs/                          App auf GitHub Pages: index.html, app.js, form.js (Ansicht „Form“), karte.js (Karte), historie.js (Historie), touren.js (Mehrtagestouren), daten/orte.txt (Ortsliste GeoNames), hilfe.js (Erklärungen), style.css, sw.js, manifest.json, icons/
+/docs/                          App auf GitHub Pages: index.html, app.js, form.js (Ansicht „Form“), karte.js (Karte), historie.js (Historie), touren.js (Mehrtagestouren), fotos.js (Fotoschatz), daten/orte.txt (Ortsliste GeoNames), hilfe.js (Erklärungen), style.css, sw.js, manifest.json, icons/
 /.github/workflows/deploy-gas.yml  Deployment nach Apps Script per clasp
 ```
 
@@ -395,6 +395,8 @@ Für v0.7 (Android-App):
 2. GitHub → Actions → „Android-App bauen“ → „Run workflow“. Danach gibt es unter Releases eine Datei `sport-0.7.0-<Nummer>.apk`.
 3. Am Handy https://github.com/obitusde/sport/releases/latest öffnen, APK herunterladen, öffnen, Installation aus dieser Quelle erlauben, installieren.
 4. App öffnen, Benachrichtigungen erlauben. Verbindung ist evtl. neu einzutragen (die App hat einen eigenen Speicher). Unter Einstellungen → Benachrichtigungen „Test“ tippen.
+
+Für v0.14 (Fotoschatz): App-Update installieren (Optionen → „Nach App-Update suchen“), dann Optionen → Fotoschatz → Link einfügen (in der App) bzw. „Link übernehmen“ (im Browser).
 
 Für v0.13: nichts einzurichten, App neu öffnen.
 
@@ -458,6 +460,7 @@ Für v0.5: nichts einzurichten. Optional `webAppTesten` ausführen: loggt, wie v
 | v0.7 | Android-App: Hülle um die PWA, Benachrichtigungen (konfigurierbar), Updates über GitHub-Releases | Benachrichtigungen |
 | v0.8 | Schrittzähler des Handys: Diagnose, Blatt „Schritte“, Anzeige in Woche und Form | Bewegung im Alltag |
 | v0.9 | Alltagspunkte aus Schritten (einstellbar, ohne Schritte während Aktivitäten); Karte mit allen Spuren als Heatmap, Wanderwege-Ebene, Filter nach Sportart und Jahr, Spur in der Detailansicht, Historie nachladen | Ziel 5, Alltag zählt |
+| v0.14 | Fotos aus dem Fotoschatz auf Tour- und Aktivitätsseiten (Bildstreifen, Kartenpunkte, Betrachter, Link) | Erinnerungen mit Bildern |
 | v0.13 | Tour-Regeln nach echten Beispielen (keine Ferien-Standorte, keine Tagesausflüge ab Zuhause), Orte unterwegs, Kartenwahl auf allen Karten | Touren stimmen |
 | v0.12 | Mehrtagestouren: automatisch erkannt (Etappen, Pausentage, Ausflüge, Zug-Lücken, ohne Pendeln), Tour-Seite, in Historie, Details, Karte und Erfolgen; korrigierbar | Erinnerungen an Touren |
 | v0.11 | Route antippen markiert sie, Höhenmeter auf/ab im Popup, Spuren weit herausgezoomt sichtbar, Reiter „Historie“ zum Suchen und Filtern, Wartung per Knopf, GPX/TCX für ältere Aktivitäten | Alles finden, ohne PC warten |
@@ -486,6 +489,7 @@ Für v0.5: nichts einzurichten. Optional `webAppTesten` ausführen: loggt, wie v
 
 | Version | Datum | Änderung |
 |---|---|---|
+| 0.14.0 | 2026-11-18 | v0.14 Fotoschatz: `docs/fotos.js` (neu), `docs/touren.js`, `docs/karte.js` (Ebene „Fotos“), `docs/app.js` (Detail, Einstellungen, Betrachter), `docs/style.css`, `docs/hilfe.js`, `docs/sw.js`, `docs/index.html` 0.14.0; `android/` 0.14.0 (nur `/sport/` im WebView). Apps Script unverändert |
 | 0.13.0 | 2026-11-18 | v0.13: `docs/touren.js` 0.13.0 (neue Regeln: Übernachtung zu Hause beendet Tour, mindestens eine Übernachtung unterwegs, Lücke am Folgetag nur nach Übernachtung unterwegs, Entfernung ohne Lücken, Ferien-Standort; Orte unterwegs), `docs/daten/orte.txt` (neu, GeoNames), `docs/karte.js` 0.13.0 (Kartenwahl auf allen Karten, OSM außerhalb der Schweiz), `docs/app.js`, `docs/hilfe.js`, `docs/style.css`, `docs/sw.js`, `docs/index.html` 0.13.0. Apps Script und Android unverändert |
 | 0.12.0 | 2026-11-18 | v0.12 Mehrtagestouren: `docs/touren.js` (neu: Erkennung, Tour-Seite, Korrekturen), `gas/Touren.gs` (neu: Blatt „Touren“, Aktionen `touren`, `tourSetzen`), `gas/WebApp.gs` 0.12.0, `gas/Spuren.gs` 0.12.0 (Diagnose listet auch erfolgreiche Spuren). Oberfläche 0.12.0: `docs/app.js` (Unterseiten als Stapel, Tour-Hinweis in den Details, Touren in Erfolgen), `docs/historie.js` (Umschalter Aktivitäten/Touren), `docs/karte.js` (Filter „Nur Touren“, Tour im Popup, Spuren beim Start aus dem Zwischenspeicher), `docs/style.css`, `docs/hilfe.js`, `docs/sw.js`, `docs/index.html`. Android unverändert |
 | 0.11.0 | 2026-11-18 | v0.11: `gas/Spuren.gs` 0.11.0 (GPX/TCX mit `xmlPunkte_`, `SPUR_VERSION` 3 nur für Spuren ohne Ergebnis, `spurenStand`), `gas/WebApp.gs` 0.11.0 (Spalten `hmAb`, `ort`, Aktion `wartung`), `gas/Hilfen.gs` 0.11.0 (Protokoll mitschneiden). Oberfläche 0.11.0: `docs/historie.js` (neu, Reiter „Historie“), `docs/karte.js` (Markierung, Höhenmeter im Popup, Breite je Zoom, Punkte je Spur), `docs/app.js` (Wartung, Scroll-Position, Tausender mit Apostroph auch bei km), `docs/index.html` (sechs Reiter, „Optionen“), `docs/style.css`, `docs/hilfe.js`, `docs/sw.js`. Android unverändert |

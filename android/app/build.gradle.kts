@@ -1,4 +1,4 @@
-// app/build.gradle.kts – Sport-App (Android), Version 0.9.0 (2026-11-18)
+// app/build.gradle.kts – Sport-App (Android), Version 0.14.0 (2026-11-18)
 //
 // Signatur: Die GitHub Action legt den Schlüssel aus dem Secret ANDROID_KEYSTORE_B64 ab
 // und übergibt Pfad und Passwort als Umgebungsvariablen. Ohne diese Variablen wird
@@ -11,7 +11,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val appVersion = "0.9.0"
+val appVersion = "0.14.0"
 val laufNummer = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
 val schluesselPfad: String? = System.getenv("SPORT_KEYSTORE")
 val schluesselPasswort: String? = System.getenv("SPORT_KEYSTORE_PASSWORT")

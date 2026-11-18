@@ -1,6 +1,6 @@
 /**
  * app.js – Sport-App
- * Version: 0.13.0 (2026-11-18)
+ * Version: 0.14.0 (2026-11-18)
  *
  * Ansichten: Woche, Einstellungen.
  * Die App holt die Aktivitäten als Liste von der Apps-Script-Web-App und rechnet
@@ -50,10 +50,12 @@
  * für Schritt zurück (z. B. Etappe → Tour → Historie).
  * Änderungen 0.13.0: strengere Tour-Erkennung und Orte unterwegs (touren.js), Kartenwahl auf
  * allen Karten (karte.js).
+ * Änderungen 0.14.0: Fotos aus dem Fotoschatz (fotos.js) in Detailansicht und Tour-Seite,
+ * Abschnitt „Fotoschatz“ in den Einstellungen, Bildbetrachter (Zurück-Taste schließt ihn).
  */
 'use strict';
 
-const APP_VERSION = '0.13.0';
+const APP_VERSION = '0.14.0';
 
 const SPEICHER = {
   url: 'sport.url',
@@ -1485,6 +1487,8 @@ function ansichtEinstellungen() {
 
   ${abgleichHtml()}
 
+  ${fotoschatzEinstellungenHtml()}
+
   ${wartungHtml()}
 
   <h2>Daten</h2>
@@ -1640,6 +1644,7 @@ function ansichtDetail() {
   if (a.minGesamt && a.min && a.minGesamt - a.min >= 1) kz.push(kennzahl(dauer(a.minGesamt), 'Gesamtzeit'));
   if (d.vMaxMs && !lauf) kz.push(kennzahl(dezimal1.format(d.vMaxMs * 3.6) + ' km/h', 'Max. Geschwindigkeit'));
   html += '<div class="kennzahlen">' + kz.join('') + '</div>';
+  html += fotosHtml(aktivitaetFotos(a), null);
 
   if (zustand.detailLaedt) return html + '<p class="leise stand">Lade Details …</p>';
   if (zustand.detailFehler) return html + `<p class="hinweis-fehler stand">${esc(zustand.detailFehler)}</p>`;
@@ -1868,6 +1873,7 @@ document.addEventListener('submit', async ereignis => {
 
 // Zurück-Taste (Handy) bzw. Knopf „Zurück“ schließt die Detailansicht
 window.addEventListener('popstate', () => {
+  if (betrachterZurueck()) return;
   if (karteZustand.vollbild) {
     karteZustand.vollbild = null;
     zeichnen();

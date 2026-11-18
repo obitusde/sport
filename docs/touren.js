@@ -1,6 +1,6 @@
 /**
  * touren.js – Mehrtagestouren erkennen und anzeigen
- * Version: 0.13.0 (2026-11-18)
+ * Version: 0.14.0 (2026-11-18)
  *
  * Erkennung (entschieden mit Christof 2026-11-18), nur Wandern oder nur Rad pro Tour:
  * - Etappe = Aktivität von A nach B. Die nächste Etappe beginnt höchstens TOUR_ANSCHLUSS_KM
@@ -30,6 +30,8 @@
  * - Orte unterwegs: Ortsliste aus GeoNames (daten/orte.txt, offline, die Spur verlässt das
  *   Handy nicht). Etappe „Start → Ziel, über …“ und Zeile „über …“ für die ganze Tour; der
  *   automatische Name ist „Ort beim ersten Punkt → Ort beim letzten Punkt“.
+ * Änderungen 0.14.0: Fotos aus dem Fotoschatz (fotos.js) auf der Tour-Seite (Bildstreifen,
+ *   Link in den Fotoschatz) und als abschaltbare Ebene „Fotos“ auf der Tour-Karte.
  * Nutzt Funktionen und Konstanten aus app.js und karte.js.
  */
 'use strict';
@@ -496,6 +498,7 @@ function ansichtTour() {
     kennzahl(String(t.etappen), t.etappen === 1 ? 'Etappe' : 'Etappen'),
     kennzahl(km(t.km / Math.max(1, t.aktiveTage)), 'Ø pro Tag unterwegs')
   ].join('') + '</div>';
+  html += fotosHtml(tourFotos(t), t.von);
   if (t.luecken) html += `<p class="leise klein-text">${t.luecken === 1 ? 'Eine Lücke' : t.luecken + ' Lücken'} zwischen Etappen (zusammen ${km(t.lueckenKm)}), z. B. mit dem Zug. Dort ist auf der Karte keine Linie gezogen.</p>`;
 
   // Etappenliste mit Pausentagen
@@ -561,7 +564,9 @@ async function tourKarteNachZeichnen() {
     const s = spurProId.get(tt.x.a.id);
     if (s && s.teile) s.teile.forEach(teil => alleGrenzen.extend(L.latLngBounds(teil)));
   });
-  kartenEbenen(karte, inDerSchweiz(alleGrenzen) ? karteZustand.grundkarte : 'osm', 0.7);
+  const fotos = fotosZustand.fotos ? fotoEbene(karte, tourFotos(t)) : null;
+  kartenEbenen(karte, inDerSchweiz(alleGrenzen) ? karteZustand.grundkarte : 'osm', 0.7, fotos);
+  if (fotos) fotos.addTo(karte);
   vollbildKnopf('tour').addTo(karte);
   const grenzen = L.latLngBounds([]);
   const ersterTag = t.teile[0].x.tag;

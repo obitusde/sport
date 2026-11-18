@@ -1,6 +1,6 @@
 /*
  * MainActivity.kt – Hülle um die Web-App (GitHub Pages)
- * Version: 0.8.0 (2026-11-18)
+ * Version: 0.14.0 (2026-11-18)
  *
  * Zeigt https://obitusde.github.io/sport/ in einem WebView. Die Oberfläche kommt also
  * weiterhin aus /docs und aktualisiert sich ohne neue APK. Über die Brücke „SportApp“
@@ -8,6 +8,8 @@
  * Links auf andere Seiten öffnen im Browser.
  * Ab 0.8.0: fragt auch die Berechtigung „Körperliche Aktivität“ für den Schrittzähler an
  * und liest die Schritte beim Öffnen der App.
+ * Ab 0.14.0: Im WebView bleibt nur /sport/; andere Seiten unter obitusde.github.io (z. B. der
+ * Fotoschatz) öffnen im Browser.
  */
 package de.obitus.sport
 
@@ -30,6 +32,7 @@ class MainActivity : Activity() {
     companion object {
         const val START_URL = "https://obitusde.github.io/sport/"
         private const val ERLAUBTER_HOST = "obitusde.github.io"
+        private const val ERLAUBTER_PFAD = "/sport"
         private const val ANFRAGE_BERECHTIGUNGEN = 1
     }
 
@@ -64,7 +67,9 @@ class MainActivity : Activity() {
         web.addJavascriptInterface(Bruecke(this), "SportApp")
         web.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, req: WebResourceRequest): Boolean {
-                if (req.url.host == ERLAUBTER_HOST) return false
+                // Nur die Sport-App selbst im WebView; alles andere (auch der Fotoschatz unter
+                // derselben Adresse) im Browser, damit die Sport-App nicht ersetzt wird
+                if (req.url.host == ERLAUBTER_HOST && (req.url.path ?: "").startsWith(ERLAUBTER_PFAD)) return false
                 startActivity(Intent(Intent.ACTION_VIEW, req.url))
                 return true
             }

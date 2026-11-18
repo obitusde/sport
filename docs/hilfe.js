@@ -1,6 +1,6 @@
 /**
  * hilfe.js – Erklär-Seite „So funktioniert die App“
- * Version: 0.13.0 (2026-11-18)
+ * Version: 0.14.0 (2026-11-18)
  *
  * Erreichbar über das „?“ in „Form“ und „Erfolge“ sowie über die Einstellungen.
  * Werte wie Ziele und Grenzen werden aus app.js gelesen, damit der Text stimmt,
@@ -113,6 +113,10 @@ function ansichtHilfe() {
       <p><b>Orte:</b> Start und Ziel jeder Etappe und die größeren Orte unterwegs („über …“) kommen aus einer Ortsliste in der App (GeoNames, CC BY 4.0). Deine Spuren verlassen dafür das Handy nicht. Die Karte lässt sich oben rechts umschalten; außerhalb der Schweiz beginnt sie mit OpenStreetMap.</p>
       <p>Touren findest du unter Historie → „Touren“, in den Erfolgen und auf der Karte (Filter „Nur Touren“). Die Tour-Seite zeigt alle Etappen auf einer Karte, jeden Tag in einer eigenen Farbe, dazu Summen und die Etappenliste mit Pausentagen.</p>
       <p><b>Korrigieren:</b> Auf der Tour-Seite umbenennen, mit „×“ eine Aktivität herausnehmen oder die ganze Tour auflösen. Fehlt eine Aktivität, öffne sie und tippe auf „Zu Tour hinzufügen“. Die Korrekturen gelten auf allen Geräten.</p>`)}
+
+    ${abschnitt('Fotos aus dem Fotoschatz', `
+      <p>Ist der Fotoschatz verbunden (Optionen → Fotoschatz), zeigt die App Fotos aus dem Zeitraum einer Tour bzw. während einer Aktivität: als schmalen Bildstreifen unter der Karte und als kleine Punkte auf der Karte (über das Ebenen-Symbol oben rechts abschaltbar). Antippen öffnet das Foto groß, Wischen blättert, „Fotoschatz“ öffnet es dort.</p>
+      <p>Der Fotoschatz-Link wird nur auf diesem Gerät gespeichert. Im Browser lässt er sich aus dem Fotoschatz übernehmen, in der Android-App wird er einmal eingefügt. Das Verzeichnis der Fotos lädt die App höchstens einmal am Tag neu.</p>`)}
 
     ${abschnitt('Mit Garmin abgleichen', `
       <p>Die App übernimmt neue Aktivitäten von Garmin automatisch, spätere Änderungen aber nicht. Hast du bei Garmin eine Aktivität geändert (z. B. Sportart, Name, gekürzt) oder gelöscht, gehe zu Einstellungen → „Mit Garmin abgleichen“.</p>
