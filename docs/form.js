@@ -1,6 +1,6 @@
 /**
  * form.js – Ansicht „Form“: Wo stehe ich sportlich? Relative Werte statt absoluter.
- * Version: 0.6.0 (2026-11-17)
+ * Version: 0.8.0 (2026-11-18)
  *
  * Alles wird mit dem eigenen Schnitt verglichen:
  * - Formstand: Ø der letzten 4 abgeschlossenen Wochen gegenüber dem Ø der letzten
@@ -11,6 +11,7 @@
  *   3 Monate mit den 3 Monaten davor und mit dem Vorjahr.
  * - Dieses Jahr bis heute gegenüber dem Vorjahr bis zum gleichen Tag.
  * - Aktive Stunden pro Jahr.
+ * Ab 0.8.0: Schritte pro Tag vom Handy (letzte 28 Tage gegenüber bis zu 365 Tagen davor).
  * Unrealistische Aktivitäten (siehe plausibilitaet in app.js) zählen nicht für km und Zeit.
  * Nutzt Hilfsfunktionen und Konstanten aus app.js (wird vor app.js geladen, aber erst
  * nach dem Laden aufgerufen).
@@ -88,7 +89,19 @@ function formVergleich() {
     const jetzt = mittel(kurz.map(w => m.wert(woche(w))));
     if (!schnitt) return null;
     return Object.assign({}, m, { schnitt, jetzt, verhaeltnis: jetzt / schnitt });
-  }).filter(Boolean);
+  }).filter(Boolean).concat(schritteVergleich() || []);
+}
+
+/** Schritte pro Tag: letzte 28 Tage (ohne heute) gegenüber bis zu 365 Tagen davor. */
+function schritteVergleich() {
+  if (!zustand.schritte || !zustand.schritte.size) return null;
+  const heute = tagePlus(new Date(), 0);
+  const jetzt = schritteZeitraum(tagePlus(heute, -28), heute);
+  const basis = schritteZeitraum(tagePlus(heute, -28 - 365), tagePlus(heute, -28));
+  if (jetzt.length < 7 || basis.length < 14) return null;
+  const s = mittel(basis);
+  if (!s) return null;
+  return [{ key: 'schritte', name: 'Schritte pro Tag', format: x => zahlFormat0.format(x), jetzt: mittel(jetzt), schnitt: s, verhaeltnis: mittel(jetzt) / s }];
 }
 
 /** Eine Zeile „Kennzahl – relativer Wert“ mit Balken (Mitte = 100 %). */
@@ -265,7 +278,7 @@ function ansichtForm() {
   // 2. Vergleich je Kennzahl
   if (vgl.length) {
     html += '<h2>Letzte 4 Wochen gegenüber deinem Schnitt</h2><section class="karte">' +
-      vgl.map(m => vergleichZeile(m.name, m.format(m.jetzt) + ' pro Woche · Schnitt ' + m.format(m.schnitt), m.verhaeltnis)).join('') +
+      vgl.map(m => vergleichZeile(m.name, m.format(m.jetzt) + (m.key === 'schritte' ? ' pro Tag' : ' pro Woche') + ' · Schnitt ' + m.format(m.schnitt), m.verhaeltnis)).join('') +
       '</section>';
   }
 

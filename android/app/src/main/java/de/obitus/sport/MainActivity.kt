@@ -1,11 +1,13 @@
 /*
  * MainActivity.kt – Hülle um die Web-App (GitHub Pages)
- * Version: 0.7.0 (2026-11-18)
+ * Version: 0.8.0 (2026-11-18)
  *
  * Zeigt https://obitusde.github.io/sport/ in einem WebView. Die Oberfläche kommt also
  * weiterhin aus /docs und aktualisiert sich ohne neue APK. Über die Brücke „SportApp“
  * (siehe Bruecke) kann die Web-Oberfläche native Funktionen nutzen.
  * Links auf andere Seiten öffnen im Browser.
+ * Ab 0.8.0: fragt auch die Berechtigung „Körperliche Aktivität“ für den Schrittzähler an
+ * und liest die Schritte beim Öffnen der App.
  */
 package de.obitus.sport
 
@@ -28,7 +30,7 @@ class MainActivity : Activity() {
     companion object {
         const val START_URL = "https://obitusde.github.io/sport/"
         private const val ERLAUBTER_HOST = "obitusde.github.io"
-        private const val ANFRAGE_BENACHRICHTIGUNG = 1
+        private const val ANFRAGE_BERECHTIGUNGEN = 1
     }
 
     private lateinit var web: WebView
@@ -70,8 +72,31 @@ class MainActivity : Activity() {
 
         if (gespeichert == null || web.restoreState(gespeichert) == null) web.loadUrl(START_URL)
 
-        benachrichtigungenErlauben()
+        berechtigungenAnfragen()
         PruefJob.planen(this)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        schritteAktualisieren(senden = false)
+    }
+
+    /** Liest die Schritte im Hintergrund und meldet der Oberfläche den neuen Stand. */
+    fun schritteAktualisieren(senden: Boolean) {
+        if (!Schritte.erlaubt(this)) return
+        Thread {
+            try {
+                Schritte.aktualisieren(this)
+                val p = Speicher.prefs(this)
+                if (Speicher.hatVerbindung(this) &&
+                    (senden || System.currentTimeMillis() - p.getLong("schritte_gesendet", 0) > 10 * 60 * 1000L)) {
+                    Schritte.senden(this)
+                }
+            } catch (e: Exception) {
+                // Netz oder Sensor nicht verfügbar: beim nächsten Mal wieder
+            }
+            js("window.nativeSchritte && window.nativeSchritte()")
+        }.start()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -84,17 +109,22 @@ class MainActivity : Activity() {
         if (web.canGoBack()) web.goBack() else super.onBackPressed()
     }
 
-    fun benachrichtigungenErlauben() {
-        if (!Melder.erlaubt(this)) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), ANFRAGE_BENACHRICHTIGUNG)
+    /** Fragt fehlende Berechtigungen an: Benachrichtigungen und körperliche Aktivität (Schritte). */
+    fun berechtigungenAnfragen() {
+        val fehlt = mutableListOf<String>()
+        if (!Melder.erlaubt(this)) fehlt.add(Manifest.permission.POST_NOTIFICATIONS)
+        if (!Schritte.erlaubt(this)) fehlt.add(Manifest.permission.ACTIVITY_RECOGNITION)
+        if (fehlt.isNotEmpty()) requestPermissions(fehlt.toTypedArray(), ANFRAGE_BERECHTIGUNGEN)
     }
 
     override fun onRequestPermissionsResult(code: Int, rechte: Array<out String>, ergebnis: IntArray) {
         super.onRequestPermissionsResult(code, rechte, ergebnis)
+        schritteAktualisieren(senden = false)
         js("window.nativeGeaendert && window.nativeGeaendert()")
     }
 
     /** Zeigt einen Text als Meldung in der Web-Oberfläche. */
     fun meldungAnWeb(text: String) = js("window.nativeMeldung && window.nativeMeldung(" + JSONObject.quote(text) + ")")
 
-    private fun js(code: String) = runOnUiThread { web.evaluateJavascript(code, null) }
+    fun js(code: String) = runOnUiThread { web.evaluateJavascript(code, null) }
 }

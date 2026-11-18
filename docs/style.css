@@ -1,4 +1,4 @@
-/* style.css – Sport-App, Version 0.7.0 (2026-11-18) */
+/* style.css – Sport-App, Version 0.8.0 (2026-11-18) */
 
 :root {
   --hintergrund: #f6f5f2;
@@ -317,6 +317,8 @@ a.knopf { text-decoration: none; }
 .tag-name { font-size: 0.75rem; color: var(--text-2); }
 .tag-nr { font-weight: 600; font-size: 0.95rem; }
 .tag.zukunft .tag-nr { color: var(--text-2); font-weight: 400; }
+.ziel-zahl.klein { font-size: 1.8rem; }
+.tag-schritte { font-size: 0.7rem; color: var(--text-2); margin-top: 3px; font-variant-numeric: tabular-nums; }
 .tag-punkte { display: flex; justify-content: center; gap: 3px; min-height: 8px; margin-top: 4px; flex-wrap: wrap; padding: 0 2px; }
 .punkt { width: 8px; height: 8px; border-radius: 50%; background: var(--andere); }
 

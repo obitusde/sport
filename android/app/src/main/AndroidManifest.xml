@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- AndroidManifest.xml – Sport-App, Version 0.7.0 (2026-11-18) -->
+<!-- AndroidManifest.xml – Sport-App, Version 0.8.0 (2026-11-18) -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
@@ -7,6 +7,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Damit der Hintergrund-Job einen Neustart des Handys übersteht -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Schrittzähler (ab 0.8.0) -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />
 
     <application
         android:allowBackup="false"

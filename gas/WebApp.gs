@@ -1,6 +1,6 @@
 /**
  * WebApp.gs – Schnittstelle für die App (JSON)
- * Version: 0.7.0 (2026-11-18)
+ * Version: 0.8.0 (2026-11-18)
  *
  * Aufruf: GET <webapp-url>?token=<WEBAPP_TOKEN>&aktion=<aktion>&...
  *
@@ -13,6 +13,8 @@
  * | sammeln           | holt neue Aktivitäten von Garmin ins Sheet: {neu, proSportart} |
  * | details           | Zusatzwerte einer Aktivität (id): {id, details: {…}}            |
  * | meldung           | Text einer Benachrichtigung (art, seit), siehe Meldungen.gs      |
+ * | schritteSetzen    | Schritte pro Tag vom Handy speichern (daten), siehe Schritte.gs  |
+ * | schritte          | alle Schritte pro Tag: {tage: [[datum, schritte], …]}            |
  *
  * Jede Antwort ist JSON: {ok: true, version, …} oder {ok: false, fehler}.
  * Ohne gültiges Token liefert die Web-App keine Daten.
@@ -35,9 +37,10 @@
  * Änderungen 0.7.0: Aktion „meldung“ für die Benachrichtigungen der Android-App.
  *   Unrealistische Aktivitäten (meldungPlausibel_ in Meldungen.gs) bekommen keine
  *   geschätzten Sportpunkte mehr, nur echte Intensitätsminuten.
+ * Änderungen 0.8.0: Aktionen „schritteSetzen“ und „schritte“ (Schrittzähler der Android-App).
  */
 
-const WEBAPP_VERSION = '0.7.0';
+const WEBAPP_VERSION = '0.8.0';
 const PUNKTE_AB_JAHR = 2023;
 const BLATT_KONFIGURATION = 'Konfiguration';
 
@@ -148,6 +151,10 @@ function aktionAusfuehren_(p) {
       return Object.assign(basis, { einstellungen: einstellungenLesen_() });
     case 'status':
       return Object.assign(basis, statusDaten_());
+    case 'schritteSetzen':
+      return Object.assign(basis, schritteSetzen_(p));
+    case 'schritte':
+      return Object.assign(basis, schritteLesen_());
     case 'meldung':
       return Object.assign(basis, { meldung: meldung_(p) });
     case 'details':

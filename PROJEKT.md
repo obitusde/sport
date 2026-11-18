@@ -1,6 +1,6 @@
 # PROJEKT.md – Sport-Tracker (Arbeitstitel „sport")
 
-Version: 0.7.0 (2026-11-18) – v0.7 Android-App (Hülle, Benachrichtigungen, Updates) gebaut
+Version: 0.8.0 (2026-11-18) – v0.8 Schrittzähler gebaut
 
 Dieses Dokument ist die Grundlage für die Entwicklung mit Claude Code. Es beschreibt Ziele, Architektur, Arbeitsweise und Fahrplan. Claude Code liest es vor jeder Arbeit und hält es aktuell.
 
@@ -42,7 +42,7 @@ Epix / Tacho → Garmin Connect (unverändert)
    Android-App (APK, in GitHub gebaut, ab v0.7)
      • zeigt die PWA im WebView, Brücke window.SportApp
      • Hintergrund-Job ~30 min: Benachrichtigungen (Text von der Web-App), Update-Prüfung
-     • ab v0.8: Schrittzähler des Handys
+     • Schrittzähler des Handys (v0.8) → Blatt „Schritte“
 ```
 
 ### Bausteine
@@ -135,6 +135,7 @@ Epix / Tacho → Garmin Connect (unverändert)
 - **Fitness-Stand = Laufökonomie-Trend:** Tempo im Verhältnis zum Puls über Monate, als Diagramm im Verlauf, als kurze Zeile in der Wochenansicht. VO2max liefert die API nicht.
 - **Android-App als Hülle** (entschieden 2026-11-18): APK mit WebView um die bestehende PWA, damit die Oberfläche eine Codebasis bleibt und ohne neue APK aktualisiert wird. Nativ nur: Benachrichtigungen, Update-Prüfung, (v0.8) Schrittzähler. Gebaut von `.github/workflows/android.yml`; versionCode = Laufnummer der Action; Release-Tag `apk-<Laufnummer>`. Update-Prüfung über die GitHub-API (`releases/latest`), Installation per Download im Browser.
 - **Benachrichtigungen:** konfigurierbar in der App (Einstellungen): Erinnerung (Standard Do 18 Uhr, nur wenn ein Ziel offen ist), Wochenrückblick (Standard So 19 Uhr; Mo–Do über die Vorwoche), Erfolge (Bestzeiten, Bestmarken, Jahres-Abzeichen neuer Importe). Hintergrund-Job etwa alle 30 Minuten; Texte rechnet die Web-App (`gas/Meldungen.gs`), damit die Logik nicht in Kotlin doppelt steht.
+- **Schrittzähler** (entschieden 2026-11-18): Hardware-Sensor `TYPE_STEP_COUNTER` des Handys, kein GPS, keine Gesundheits-App. Gelesen etwa alle 30 Minuten im Hintergrund-Job und beim Öffnen der App; Differenz zum letzten Stand wird auf Kalendertage verteilt (über Mitternacht anteilig). Übertragung der letzten 14 Tage höchstens alle 2 Stunden (beim Öffnen alle 10 Minuten). Uhr-Schritte zählen nicht dazu. Schritte sind keine Sportpunkte. Anzeige: Tageswerte in der Wochenansicht, Wochenschnitt (nur abgeschlossene Tage) gegenüber 90 Tagen davor, unter „Form“ 28 Tage gegenüber bis zu 365 Tagen davor, Zeile im Wochenrückblick.
 - **Keine geschätzten Sportpunkte für unrealistische Aktivitäten** (nur echte Intensitätsminuten), seit Web-App 0.7.0.
 - **App ohne Build-Schritt:** schlichtes HTML/CSS/JavaScript in `/docs`, GitHub Pages veröffentlicht direkt.
 - **Deployment per GitHub Action schon ab v0.1** (statt erst v0.2). Die Skript-ID steht als Repo-Variable `GAS_SCRIPT_ID`, die Action erzeugt daraus `gas/.clasp.json`. clasp-Version fest: `@google/clasp@3.4.1`.
@@ -226,6 +227,16 @@ Laufband-Läufe zählen fürs Laufziel. Indoor-Fahrten zählen zu Rad, haben abe
 - Wochenbeginn: Montag
 - Weitere Einstellungen nach Bedarf
 
+### Sheet „Schritte" (ab v0.8)
+
+| Spalte | Inhalt |
+|---|---|
+| datum | Tag als Text `YYYY-MM-DD` (Europe/Zurich) |
+| schritte | Schritte des Handys an diesem Tag |
+| aktualisiert | Zeitpunkt der letzten Übertragung |
+
+Die Android-App schickt jeweils die letzten 14 Tage; vorhandene Tage werden überschrieben (das Handy ist die Quelle).
+
 ### Drive-Ordner „Sport-Spuren"
 
 - Eine GeoJSON-Datei pro Aktivität, volle Auflösung.
@@ -246,6 +257,8 @@ Laufband-Läufe zählen fürs Laufziel. Indoor-Fahrten zählen zu Rad, haben abe
 | `sammeln` | startet den Sammler sofort (ohne Fehler-Mail), liefert `neu` und `proSportart`. Für den Knopf „Von Garmin holen“ |
 | `details` | Zusatzwerte einer Aktivität (`id`) aus der Spalte `details`: `{id, details: {…}}`, leeres Objekt, wenn nichts da ist |
 | `meldung` | Text einer Benachrichtigung: `art` = `test`, `erinnerung`, `rueckblick`, `erfolge` (mit `seit` in ms). `{meldung: {titel, text}}` oder `{meldung: null}` (`gas/Meldungen.gs`) |
+| `schritteSetzen` | Schritte pro Tag vom Handy speichern: `daten` = JSON `{"YYYY-MM-DD": Zahl}` (`gas/Schritte.gs`) |
+| `schritte` | alle Tage: `{tage: [["YYYY-MM-DD", Zahl], …]}` |
 | `spuren`, `spur` | ab v0.9 |
 
 Antwort immer JSON: `{ok: true, version, …}` oder `{ok: false, fehler}`. Ohne gültiges Token: `{ok: false, fehler: "nicht berechtigt"}`.
@@ -265,7 +278,8 @@ Die Web-App läuft als Christof („Ausführen als: Ich“) mit Zugriff „Jeder
 /gas/Sammler.gs                 v0.2: Sammler, Sheet, Zeitgeber, Fehler-Mail
 /gas/WebApp.gs                  v0.3: Schnittstelle für die App (doGet)
 /gas/Meldungen.gs               v0.7: Texte für die Benachrichtigungen
-/android/                       Android-App (Kotlin): MainActivity (WebView), Bruecke, PruefJob, Pruefung, Melder, Update, Netz, Speicher
+/gas/Schritte.gs                v0.8: Blatt „Schritte“, Aktionen schritteSetzen und schritte
+/android/                       Android-App (Kotlin): MainActivity (WebView), Bruecke, PruefJob, Pruefung, Melder, Update, Netz, Speicher, Schritte
 /.github/workflows/android.yml  APK bauen, signieren, als Release „apk-<Laufnummer>“ veröffentlichen
 /docs/                          App auf GitHub Pages: index.html, app.js, form.js (Ansicht „Form“), hilfe.js (Erklärungen), style.css, sw.js, manifest.json, icons/
 /.github/workflows/deploy-gas.yml  Deployment nach Apps Script per clasp
@@ -328,6 +342,12 @@ Für v0.7 (Android-App):
 3. Am Handy https://github.com/obitusde/sport/releases/latest öffnen, APK herunterladen, öffnen, Installation aus dieser Quelle erlauben, installieren.
 4. App öffnen, Benachrichtigungen erlauben. Verbindung ist evtl. neu einzutragen (die App hat einen eigenen Speicher). Unter Einstellungen → Benachrichtigungen „Test“ tippen.
 
+Für v0.8 (Schrittzähler):
+
+1. Warten, bis „Android-App bauen“ grün ist; die installierte App meldet das Update (oder Einstellungen → „Nach App-Update suchen“). APK herunterladen und installieren.
+2. App öffnen, „Körperliche Aktivität“ erlauben.
+3. Einstellungen → Schrittzähler → „Schrittzähler prüfen“: zeigt Sensor, Berechtigung, Zählerstand.
+
 Für v0.5: nichts einzurichten. Optional `webAppTesten` ausführen: loggt, wie viele Aktivitäten Sportpunkte haben, wie viele davon geschätzt sind, und die persönlichen Faktoren.
 
 ---
@@ -384,6 +404,7 @@ Für v0.5: nichts einzurichten. Optional `webAppTesten` ausführen: loggt, wie v
 
 | Version | Datum | Änderung |
 |---|---|---|
+| 0.8.0 | 2026-11-18 | v0.8 Schrittzähler: `android/` 0.8.0 (`Schritte.kt` neu, Berechtigung ACTIVITY_RECOGNITION, Lesen im Job und beim Öffnen, Übertragung, Diagnose über die Brücke), `gas/Schritte.gs` 0.8.0 (neu), `gas/WebApp.gs` 0.8.0, `gas/Meldungen.gs` 0.8.0 (Schritte im Rückblick). Oberfläche 0.8.0: Schritte pro Tag in der Tagesleiste, Karte „Schritte“, Vergleich unter „Form“, Einstellungen „Schrittzähler“, Erklär-Seite |
 | 0.7.0 | 2026-11-18 | v0.7 Android-App: `android/` (Kotlin, WebView-Hülle, Brücke `SportApp`, Hintergrund-Job, Benachrichtigungen, Update-Prüfung) 0.7.0, `.github/workflows/android.yml` 0.7.0 (Probe-Build ohne Secrets, sonst signiertes Release). `gas/Meldungen.gs` 0.7.0 (Aktion `meldung`), `gas/WebApp.gs` 0.7.0 (keine Schätzpunkte für unrealistische Aktivitäten). Oberfläche 0.7.0: Benachrichtigungen in den Einstellungen (in der App) bzw. Download-Link (im Browser), Update-Knopf, Erklär-Seite ergänzt |
 | 0.6.0 | 2026-11-17 | v0.6 nach Feedback: unrealistische Aktivitäten werden erkannt und zählen nicht für km/Zeit/Bestmarken; Halbmarathon-Bestzeit entfernt; Jahrestabelle durch Jahres-Abzeichen fürs laufende Jahr ersetzt; neue Ansicht „Form“ (`docs/form.js` 0.6.0) mit Formstand, Vergleich je Kennzahl, Sportpunkte-Diagramm, Laufökonomie, Jahr bis heute, aktive Stunden pro Jahr; Erklär-Seite (`docs/hilfe.js` 0.6.0); Wochenansicht zeigt Anteil am eigenen Schnitt; Zurück führt in die vorherige Ansicht. App 0.6.0 (`app.js`, `style.css`, `sw.js`, `index.html`). Keine Änderung an Apps Script |
 | 0.5.0 | 2026-11-17 | v0.5 Sportpunkte und Erfolge: `gas/WebApp.gs` 0.5.0 (Sportpunkte ab 2023 mit Schätzung, schnellste Abschnitte in der Liste, Einstellung `wochenzielPunkte`, Standard 150), `gas/Diagnose.gs` 0.1.3 (`diagnoseZusatzwerte`). App 0.5.0: Aktivziel mit Serie in der Wochenansicht, Karte „Erfolge dieser Woche“ (Wochenbilanz, neue Abzeichen, Bestmarken, Jahres-km, Allrounder), Ansicht „Erfolge“ (Serien-Abzeichen 4/12/26/52, Bestzeiten, Bestmarken, Jahres-Kilometer, Allrounder), zweites Ziel in den Einstellungen, Sportpunkte in der Detailansicht, Trainingseffekt mit Garmins deutschen Begriffen, „Unknown“ ausgeblendet |

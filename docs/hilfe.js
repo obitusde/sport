@@ -1,6 +1,6 @@
 /**
  * hilfe.js – Erklär-Seite „So funktioniert die App“
- * Version: 0.7.0 (2026-11-18)
+ * Version: 0.8.0 (2026-11-18)
  *
  * Erreichbar über das „?“ in „Form“ und „Erfolge“ sowie über die Einstellungen.
  * Werte wie Ziele und Grenzen werden aus app.js gelesen, damit der Text stimmt,
@@ -69,6 +69,11 @@ function ansichtHilfe() {
       <p>Die Android-App zeigt dieselbe Oberfläche wie die Webseite und kann zusätzlich Benachrichtigungen schicken. Sie wird in GitHub gebaut; neue Versionen meldet sie selbst („Update verfügbar“).</p>
       <p><b>Erinnerung:</b> zur eingestellten Zeit, aber nur, wenn ein Wochenziel noch offen ist. <b>Wochenrückblick:</b> Ziele, Serien und Vergleich mit deinem Schnitt; Montag bis Donnerstag über die vergangene Woche, sonst über die laufende. <b>Erfolge:</b> neue Bestzeiten, Bestmarken und Jahres-Abzeichen, sobald neue Aktivitäten importiert sind.</p>
       <p>Die App prüft etwa alle 30 Minuten im Hintergrund. Einstellen kannst du alles unter Einstellungen → Benachrichtigungen.</p>`)}
+
+    ${abschnitt('Schritte vom Handy', `
+      <p>Die Android-App liest den eingebauten Schrittzähler des Handys. Er zählt ohnehin ständig mit und braucht praktisch keinen Akku; GPS wird nicht verwendet.</p>
+      <p>Gezählt wird nur, wenn du das Handy dabei hast, und erst ab der Installation. Die Schritte der Garmin-Uhr zählen nicht dazu, damit nichts doppelt zählt.</p>
+      <p>In der Wochenansicht siehst du die Schritte pro Tag und den Wochenschnitt im Vergleich zu den 90 Tagen davor; unter „Form“ die letzten 28 Tage im Vergleich zu deinem Schnitt (ab 3 Wochen Daten). Schritte zählen nicht als Sportpunkte.</p>`)}
 
     ${abschnitt('Werte in der Detailansicht', `
       <p><b>Pulszonen:</b> wie lange du in welchem Pulsbereich warst, von Zone 1 (Aufwärmen) bis Zone 5 (Maximum).</p>

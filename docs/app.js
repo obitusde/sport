@@ -1,6 +1,6 @@
 /**
  * app.js – Sport-App
- * Version: 0.7.0 (2026-11-18)
+ * Version: 0.8.0 (2026-11-18)
  *
  * Ansichten: Woche, Einstellungen.
  * Die App holt die Aktivitäten als Liste von der Apps-Script-Web-App und rechnet
@@ -28,10 +28,14 @@
  * die App weitergegeben, Benachrichtigungen sind in den Einstellungen konfigurierbar
  * (Erinnerung, Wochenrückblick, Erfolge, Test, Vorschau), Update-Prüfung. Im Browser
  * zeigen die Einstellungen stattdessen den Link zur APK.
+ * Änderungen 0.8.0: Schritte vom Handy (Android-App): Tageswerte in der Wochenansicht,
+ * Karte „Schritte“ mit Vergleich zum eigenen Schnitt, Einstellungen „Schrittzähler“
+ * (Status, Erlauben, Prüfen, Übertragen). Quelle: Web-App (Aktion „schritte“), in der
+ * App ergänzt um die frischesten Werte direkt vom Handy.
  */
 'use strict';
 
-const APP_VERSION = '0.7.0';
+const APP_VERSION = '0.8.0';
 
 const SPEICHER = {
   url: 'sport.url',
@@ -39,6 +43,7 @@ const SPEICHER = {
   daten: 'sport.daten',
   einstellungen: 'sport.einstellungen',
   status: 'sport.status',
+  schritte: 'sport.schritte',
   details: 'sport.details'
 };
 
@@ -70,6 +75,8 @@ const zustand = {
   datenStand: null,
   einstellungen: { wochenzielLaeufe: 2, wochenzielPunkte: 150 },
   index: null, // Wochenindex, wird bei neuen Daten verworfen
+  schritte: new Map(), // Datum (YYYY-MM-DD) → Schritte vom Handy
+  schritteServer: [],
   status: null,
   webAppVersion: null,
   laedt: false, // false, 'garmin' (Sammler läuft) oder 'daten' (Liste wird geladen)
@@ -199,11 +206,17 @@ async function allesLaden() {
   zustand.fehler = null;
   zeichnen();
   try {
-    const [liste, einst, status] = await Promise.all([
+    const [liste, einst, status, schritte] = await Promise.all([
       api('aktivitaeten'),
       api('einstellungen'),
-      api('status')
+      api('status'),
+      api('schritte').catch(() => ({ tage: null })) // ältere Web-App ohne Schritte
     ]);
+    if (Array.isArray(schritte.tage)) {
+      zustand.schritteServer = schritte.tage;
+      schreiben(SPEICHER.schritte, schritte.tage);
+    }
+    schritteZusammenfuehren();
     setzeAktivitaeten(auspacken(liste));
     zustand.datenStand = new Date().toISOString();
     zustand.einstellungen = einst.einstellungen;
@@ -256,6 +269,8 @@ function ausSpeicherLaden() {
   }
   zustand.einstellungen = Object.assign({ wochenzielLaeufe: 2, wochenzielPunkte: 150 }, lesen(SPEICHER.einstellungen, {}));
   zustand.status = lesen(SPEICHER.status, null);
+  zustand.schritteServer = lesen(SPEICHER.schritte, []);
+  schritteZusammenfuehren();
 }
 
 // ---------------------------------------------------------------------------
@@ -301,12 +316,64 @@ function benachrichtigungenSpeichern() {
 // Rückmeldungen der Android-App
 window.nativeMeldung = text => meldung(text);
 window.nativeGeaendert = () => zeichnen();
+window.nativeSchritte = () => { schritteZusammenfuehren(); zeichnen(); };
+
+/** Schritte-Status direkt vom Handy oder null. */
+function schritteNativ() {
+  if (!inApp()) return null;
+  try { return JSON.parse(window.SportApp.schritteStatus()); } catch (e) { return null; }
+}
+
+/** Schritte aus dem Sheet, überschrieben mit den frischeren Werten vom Handy. */
+function schritteZusammenfuehren() {
+  const m = new Map();
+  (zustand.schritteServer || []).forEach(([tag, n]) => m.set(tag, n));
+  const nativ = schritteNativ();
+  if (nativ && nativ.tage) Object.entries(nativ.tage).forEach(([tag, n]) => m.set(tag, n));
+  zustand.schritte = m;
+}
+
+/** Schritte der Tage im Zeitraum [von, bis), nur Tage mit Wert. */
+function schritteZeitraum(von, bis) {
+  const werte = [];
+  for (let d = tagePlus(von, 0); d < bis; d = tagePlus(d, 1)) {
+    const v = zustand.schritte.get(schluessel(d));
+    if (v !== undefined) werte.push(v);
+  }
+  return werte;
+}
+
+function schritteKurz(n) {
+  return n >= 1000 ? dezimal1.format(n / 1000) + 'k' : String(n);
+}
+
+function schritteHtml() {
+  if (!inApp()) return '';
+  const s = schritteNativ();
+  if (!s) return '';
+  const tage = Object.keys(s.tage || {}).length;
+  return `<h2>Schrittzähler</h2>
+  <section class="karte">
+    ${!s.sensor ? '<div class="hinweis-box">Dieses Handy hat keinen Schrittzähler-Sensor.</div>'
+      : !s.erlaubt ? '<div class="hinweis-box">Die App darf deine Schritte noch nicht zählen. <button class="knopf klein" data-aktion="schritte-erlauben">Erlauben</button></div>' : ''}
+    <table class="tabelle">
+      <tr><td>Heute gezählt</td><td>${zahlFormat0.format(s.heute || 0)} Schritte</td></tr>
+      <tr><td>Tage mit Werten</td><td>${tage}</td></tr>
+      <tr><td>Zuletzt übertragen</td><td>${s.gesendet ? zeitpunkt(new Date(s.gesendet).toISOString()) : '–'}</td></tr>
+    </table>
+    <div class="knopfreihe" style="margin-top:12px">
+      <button class="knopf" data-aktion="schritte-pruefen">Schrittzähler prüfen</button>
+      <button class="knopf" data-aktion="schritte-senden" ${s.erlaubt ? '' : 'disabled'}>Jetzt übertragen</button>
+    </div>
+    <p class="leise klein-text">Gezählt wird, wenn du das Handy dabei hast, ab der Installation. Die Schritte der Uhr zählen nicht dazu. Akku: praktisch kein Verbrauch.</p>
+  </section>`;
+}
 
 function benachrichtigungenHtml() {
   if (!inApp()) {
     return `<h2>Benachrichtigungen</h2>
     <section class="karte">
-      <p style="margin:0 0 10px">Benachrichtigungen gibt es in der Android-App.</p>
+      <p style="margin:0 0 10px">Benachrichtigungen und Schrittzähler gibt es in der Android-App.</p>
       <a class="knopf haupt" href="${APK_SEITE}" target="_blank" rel="noopener">Android-App herunterladen</a>
       <p class="leise klein-text">Auf der Seite die Datei „sport-….apk“ antippen und öffnen. Beim ersten Mal fragt Android, ob der Browser Apps installieren darf.</p>
     </section>`;
@@ -732,6 +799,7 @@ function ansichtWoche() {
   html += aktualisierenZeile();
   html += zielKarte(w);
   html += punkteKarte(w);
+  html += schritteKarte(w);
   html += erfolgeKarte(w);
   html += tagesKarte(w);
 
@@ -879,6 +947,36 @@ function erfolgeKarte(w) {
   </section>`;
 }
 
+/** Schritte der Woche (abgeschlossene Tage) im Vergleich zum Schnitt der 90 Tage davor. */
+function schritteKarte(w) {
+  if (!zustand.schritte.size) return '';
+  // Nur abgeschlossene Tage: der heutige Tag ist noch nicht fertig
+  const heuteBeginn = tagePlus(new Date(), 0);
+  const ende = tagePlus(w.start, 7) < heuteBeginn ? tagePlus(w.start, 7) : heuteBeginn;
+  const woche = schritteZeitraum(w.start, ende);
+  const heute = zustand.schritte.get(schluessel(new Date()));
+  if (!woche.length) {
+    if (zustand.wocheVersatz !== 0 || heute === undefined) return '';
+    return `<section class="karte" aria-label="Schritte" style="margin-top:12px">
+      <div class="ziel-zeile"><div class="ziel-zahl klein">${zahlFormat0.format(heute)} <small>Schritte heute bisher</small></div><span class="ziel-art">Schritte</span></div>
+    </section>`;
+  }
+  const schnittWoche = mittel(woche);
+  const basis = schritteZeitraum(tagePlus(w.start, -90), w.start);
+  let vergleich = '<span class="leise">Vergleich mit deinem Schnitt ab einer Woche Daten.</span>';
+  if (basis.length >= 7) {
+    const v = schnittWoche / mittel(basis);
+    vergleich = `<span class="leise">dein Schnitt: ${zahlFormat0.format(mittel(basis))} pro Tag ·</span> <b class="${formKlasse(v)}-text">${prozent(v)}</b>`;
+  }
+  return `<section class="karte" aria-label="Schritte" style="margin-top:12px">
+    <div class="ziel-zeile">
+      <div class="ziel-zahl klein">${zahlFormat0.format(schnittWoche)} <small>Schritte pro Tag</small></div>
+      <span class="ziel-art">Schritte</span>
+    </div>
+    <p class="klein-text" style="margin-top:6px">${vergleich}${zustand.wocheVersatz === 0 && heute !== undefined ? '<br><span class="leise">heute bisher ' + zahlFormat0.format(heute) + '</span>' : ''}</p>
+  </section>`;
+}
+
 function tagesKarte(w) {
   return `<section class="karte" aria-label="Tage der Woche" style="margin-top:12px">
     <div class="tage">${w.tage.map((t, i) => `
@@ -887,6 +985,7 @@ function tagesKarte(w) {
         <div class="tag-nr">${t.datum.getDate()}</div>
         <div class="tag-punkte">${t.aktivitaeten.map(a =>
     `<span class="punkt" style="background: var(--${esc(a.sportart)})" title="${esc(SPORT_NAME[a.sportart] || a.sportart)}"></span>`).join('')}</div>
+        ${zustand.schritte.has(schluessel(t.datum)) ? `<div class="tag-schritte" title="Schritte">${schritteKurz(zustand.schritte.get(schluessel(t.datum)))}</div>` : ''}
       </div>`).join('')}
     </div>
   </section>`;
@@ -1020,6 +1119,7 @@ function ansichtEinstellungen() {
   </section>
 
   ${benachrichtigungenHtml()}
+  ${schritteHtml()}
 
   <h2>Verbindung</h2>
   <section class="karte">
@@ -1319,6 +1419,9 @@ document.addEventListener('click', ereignis => {
     case 'nb-test': window.SportApp.testBenachrichtigung(); meldung('Test läuft …'); break;
     case 'nb-vorschau': window.SportApp.vorschau(ziel.dataset.art); meldung('Vorschau wird geholt …'); break;
     case 'nb-erlauben': window.SportApp.benachrichtigungenAnfragen(); break;
+    case 'schritte-erlauben': window.SportApp.schritteAnfragen(); break;
+    case 'schritte-pruefen': window.SportApp.schritteDiagnose(); meldung('Prüfe Schrittzähler …'); break;
+    case 'schritte-senden': window.SportApp.schritteAktualisieren(); meldung('Übertrage Schritte …'); break;
     case 'app-update': window.SportApp.updatePruefen(); meldung('Suche nach Update …'); break;
     case 'hilfe': unterseiteOeffnen('hilfe', { hilfe: true }); zeichnen(); break;
     case 'woche-zurueck': zustand.wocheVersatz--; zeichnen(); break;

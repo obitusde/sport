@@ -1,6 +1,6 @@
 /**
  * Meldungen.gs – Texte für die Benachrichtigungen der Android-App
- * Version: 0.7.0 (2026-11-18)
+ * Version: 0.8.0 (2026-11-18)
  *
  * Aufruf über die Web-App: aktion=meldung&art=<art>
  *   test        feste Test-Meldung (Diagnose der ganzen Kette)
@@ -10,6 +10,8 @@
  *   erfolge     neue Bestzeiten, Bestmarken und Jahres-Abzeichen von Aktivitäten, die nach
  *               „seit“ (Millisekunden) importiert wurden; null, wenn nichts Neues
  * Antwort: {meldung: {titel, text}} oder {meldung: null}.
+ * Ab 0.8.0 enthält der Rückblick die Schritte (Ø pro Tag der Woche im Vergleich zum
+ * Ø der 90 Tage davor), sobald das Handy Schritte geschickt hat.
  *
  * Die Regeln entsprechen der App (docs/app.js): Woche Montag bis Sonntag, Serien mit
  * offener laufender Woche, Sportpunkte ab 2023, Grenzen für unrealistische Aktivitäten,
@@ -202,7 +204,36 @@ function meldungRueckblick_(liste, einst, jetzt) {
     const schnitt = werte.reduce(function (s, x) { return s + x; }, 0) / werte.length;
     if (schnitt > 0) zeilen.push('Sportpunkte: ' + Math.round(w.pkt / schnitt * 100) + ' % deines Schnitts');
   }
+  const schritte = meldungSchritte_(montag);
+  if (schritte) zeilen.push(schritte);
   return { titel: 'Wochenrückblick KW ' + meldungKw_(montag), text: zeilen.join('\n') };
+}
+
+/** „Schritte: Ø 7400 pro Tag (105 % deines Schnitts)“ oder null. */
+function meldungSchritte_(montag) {
+  const tage = {};
+  schritteLesen_().tage.forEach(function (z) { tage[z[0]] = z[1]; });
+  const iso = function (d) {
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  };
+  const woche = [];
+  for (let i = 0; i < 7; i++) {
+    const k = iso(meldungTagePlus_(montag, i));
+    if (tage[k] !== undefined) woche.push(tage[k]);
+  }
+  if (woche.length < 3) return null;
+  const schnittWoche = woche.reduce(function (s, x) { return s + x; }, 0) / woche.length;
+  const davor = [];
+  for (let i = 1; i <= 90; i++) {
+    const k = iso(meldungTagePlus_(montag, -i));
+    if (tage[k] !== undefined) davor.push(tage[k]);
+  }
+  let text = 'Schritte: Ø ' + Math.round(schnittWoche) + ' pro Tag';
+  if (davor.length >= 7) {
+    const basis = davor.reduce(function (s, x) { return s + x; }, 0) / davor.length;
+    if (basis > 0) text += ' (' + Math.round(schnittWoche / basis * 100) + ' % deines Schnitts)';
+  }
+  return text;
 }
 
 function meldungErfolge_(liste, seit, heute) {

@@ -1,6 +1,6 @@
 /*
  * Pruefung.kt – Was der Hintergrund-Job bei jedem Lauf prüft
- * Version: 0.7.0 (2026-11-18)
+ * Version: 0.8.0 (2026-11-18)
  *
  * Der Job läuft etwa alle 30 Minuten (Android kann ihn verzögern). Bei jedem Lauf:
  * - Erinnerung / Wochenrückblick: Ist der eingestellte Zeitpunkt dieser Woche erreicht
@@ -10,6 +10,8 @@
  * - Erfolge: höchstens alle 3 Stunden; die Web-App meldet Bestzeiten, Bestmarken und
  *   Jahres-Abzeichen von Aktivitäten, die seit der letzten Prüfung importiert wurden.
  * - Update: höchstens einmal pro Tag.
+ * - Schritte (ab 0.8.0): Zähler lesen und verbuchen, höchstens alle 2 Stunden an die
+ *   Web-App übertragen.
  * Die Texte rechnet die Web-App, damit die Logik nur an einer Stelle steht.
  */
 package de.obitus.sport
@@ -32,6 +34,15 @@ object Pruefung {
         val p = Speicher.prefs(c)
         val jetzt = ZonedDateTime.now(ZONE)
         val jetztMs = System.currentTimeMillis()
+
+        if (Schritte.erlaubt(c)) {
+            try {
+                Schritte.aktualisieren(c)
+                if (Speicher.hatVerbindung(c) && jetztMs - p.getLong("schritte_gesendet", 0) > 2 * STUNDE) Schritte.senden(c)
+            } catch (ex: Exception) {
+                Log.w(TAG, "Schritte fehlgeschlagen: ${ex.message}")
+            }
+        }
 
         if (Speicher.hatVerbindung(c)) {
             val k = Speicher.benachrichtigungen(c)

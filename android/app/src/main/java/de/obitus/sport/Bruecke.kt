@@ -1,6 +1,6 @@
 /*
  * Bruecke.kt – Schnittstelle zwischen Web-Oberfläche und Android („window.SportApp“)
- * Version: 0.7.0 (2026-11-18)
+ * Version: 0.8.0 (2026-11-18)
  *
  * Nur für die eigene Seite obitusde.github.io gedacht (MainActivity lädt nichts anderes).
  * Alle Methoden laufen auf einem Hintergrund-Thread des WebViews; Netzwerk-Aufrufe
@@ -34,7 +34,41 @@ class Bruecke(private val a: MainActivity) {
     fun benachrichtigungenErlaubt(): Boolean = Melder.erlaubt(a)
 
     @JavascriptInterface
-    fun benachrichtigungenAnfragen() = a.runOnUiThread { a.benachrichtigungenErlauben() }
+    fun benachrichtigungenAnfragen() = a.runOnUiThread { a.berechtigungenAnfragen() }
+
+    // --- Schrittzähler (ab 0.8.0) ---
+
+    /** {sensor, erlaubt, heute, tage: {datum: schritte}, gesendet: ms} */
+    @JavascriptInterface
+    fun schritteStatus(): String = Schritte.status(a).toString()
+
+    @JavascriptInterface
+    fun schritteAnfragen() = a.runOnUiThread { a.berechtigungenAnfragen() }
+
+    /** Liest sofort und überträgt; die Oberfläche bekommt danach window.nativeSchritte(). */
+    @JavascriptInterface
+    fun schritteAktualisieren() = a.schritteAktualisieren(senden = true)
+
+    /** Diagnose: Sensor, Berechtigung, Rohwert und gespeicherte Tage als Meldung. */
+    @JavascriptInterface
+    fun schritteDiagnose() {
+        Thread {
+            val text = try {
+                val sensor = Schritte.sensorVorhanden(a)
+                val erlaubt = Schritte.erlaubt(a)
+                val roh = if (sensor && erlaubt) Schritte.aktualisieren(a) else null
+                "Sensor: " + (if (sensor) "ja" else "nein") +
+                    " · Berechtigung: " + (if (erlaubt) "ja" else "nein") +
+                    " · Zählerstand seit Neustart: " + (roh?.toLong()?.toString() ?: "–") +
+                    " · heute gezählt: " + Schritte.heute(a) +
+                    " · Tage gespeichert: " + Schritte.tage(a).length()
+            } catch (e: Exception) {
+                "Diagnose fehlgeschlagen: ${e.message}"
+            }
+            a.meldungAnWeb(text)
+            a.js("window.nativeSchritte && window.nativeSchritte()")
+        }.start()
+    }
 
     /** Diagnose: holt eine Test-Meldung von der Web-App und zeigt sie als Benachrichtigung. */
     @JavascriptInterface
