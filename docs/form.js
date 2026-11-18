@@ -1,6 +1,6 @@
 /**
  * form.js – Ansicht „Form“: Wo stehe ich sportlich? Relative Werte statt absoluter.
- * Version: 0.8.0 (2026-11-18)
+ * Version: 0.9.0 (2026-11-18)
  *
  * Alles wird mit dem eigenen Schnitt verglichen:
  * - Formstand: Ø der letzten 4 abgeschlossenen Wochen gegenüber dem Ø der letzten
@@ -12,6 +12,7 @@
  * - Dieses Jahr bis heute gegenüber dem Vorjahr bis zum gleichen Tag.
  * - Aktive Stunden pro Jahr.
  * Ab 0.8.0: Schritte pro Tag vom Handy (letzte 28 Tage gegenüber bis zu 365 Tagen davor).
+ * Ab 0.9.0: „Punkte“ = Sportpunkte + Alltagspunkte (wie das Aktivziel).
  * Unrealistische Aktivitäten (siehe plausibilitaet in app.js) zählen nicht für km und Zeit.
  * Nutzt Hilfsfunktionen und Konstanten aus app.js (wird vor app.js geladen, aber erst
  * nach dem Laden aufgerufen).
@@ -69,7 +70,7 @@ function punkteSchnitt() {
 }
 
 const FORM_METRIKEN = [
-  { key: 'pkt', name: 'Sportpunkte', wert: w => w.pkt, format: x => zahlFormat0.format(x) + ' Pkt', abPunkte: true },
+  { key: 'pkt', name: 'Punkte', wert: w => w.pkt, format: x => zahlFormat0.format(x) + ' Pkt', abPunkte: true },
   { key: 'zeit', name: 'Aktive Zeit', wert: w => w.min, format: x => dauer(x) },
   { key: 'laeufe', name: 'Läufe', wert: w => w.laeufe, format: x => dezimal1.format(x) },
   { key: 'laufen', name: 'Lauf-km', wert: w => w.km.laufen, format: x => km(x) },
@@ -234,7 +235,7 @@ function jahresVergleich() {
   const jetzt = summe(j);
   const vorher = summe(j - 1);
   const zeilen = [
-    { name: 'Sportpunkte', key: 'pkt', format: x => zahlFormat0.format(x), nur: j - 1 >= 2023 },
+    { name: 'Sportpunkte', key: 'pkt', format: x => zahlFormat0.format(x), nur: j - 1 >= 2023 }, // ohne Alltag: Schritte erst ab 2026
     { name: 'Aktive Zeit', key: 'zeit', format: x => zahlFormat0.format(x / 60) + ' h', nur: true },
     { name: 'Läufe', key: 'laeufe', format: x => zahlFormat0.format(x), nur: true },
     { name: 'Lauf-km', key: 'laufen', format: x => km(x), nur: true },

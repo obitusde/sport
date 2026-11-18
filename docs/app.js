@@ -1,6 +1,6 @@
 /**
  * app.js – Sport-App
- * Version: 0.8.0 (2026-11-18)
+ * Version: 0.9.0 (2026-11-18)
  *
  * Ansichten: Woche, Einstellungen.
  * Die App holt die Aktivitäten als Liste von der Apps-Script-Web-App und rechnet
@@ -32,10 +32,13 @@
  * Karte „Schritte“ mit Vergleich zum eigenen Schnitt, Einstellungen „Schrittzähler“
  * (Status, Erlauben, Prüfen, Übertragen). Quelle: Web-App (Aktion „schritte“), in der
  * App ergänzt um die frischesten Werte direkt vom Handy.
+ * Änderungen 0.9.0: Alltagspunkte aus Handy-Schritten (ohne Schritte während Aktivitäten)
+ * zählen zum Aktivziel; Formel und Werte einstellbar (alltagPunkte, alltagFrei,
+ * alltagProPunkt). Neue Ansicht „Karte“ (karte.js) und Spur in der Detailansicht.
  */
 'use strict';
 
-const APP_VERSION = '0.8.0';
+const APP_VERSION = '0.9.0';
 
 const SPEICHER = {
   url: 'sport.url',
@@ -68,12 +71,19 @@ const zahlFormat0 = new Intl.NumberFormat('de-CH', { maximumFractionDigits: 0 })
 const dezimal1 = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const dezimal2 = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+/** Standardwerte der Einstellungen (gleich wie EINSTELLUNGEN in gas/WebApp.gs). */
+const STANDARD_EINSTELLUNGEN = {
+  wochenzielLaeufe: 2, wochenzielPunkte: 150, alltagPunkte: 1, alltagFrei: 3000, alltagProPunkt: 200
+};
+/** Tage mit mehr Schritten gelten als unrealistisch (gleich wie SCHRITTE_MAX in gas/Schritte.gs). */
+const SCHRITTE_MAX = 50000;
+
 const zustand = {
   ansicht: 'woche',
   wocheVersatz: 0,
   aktivitaeten: [],
   datenStand: null,
-  einstellungen: { wochenzielLaeufe: 2, wochenzielPunkte: 150 },
+  einstellungen: Object.assign({}, STANDARD_EINSTELLUNGEN),
   index: null, // Wochenindex, wird bei neuen Daten verworfen
   schritte: new Map(), // Datum (YYYY-MM-DD) → Schritte vom Handy
   schritteServer: [],
@@ -267,7 +277,7 @@ function ausSpeicherLaden() {
     zustand.datenStand = daten.stand || null;
     zustand.webAppVersion = daten.version || null;
   }
-  zustand.einstellungen = Object.assign({ wochenzielLaeufe: 2, wochenzielPunkte: 150 }, lesen(SPEICHER.einstellungen, {}));
+  zustand.einstellungen = Object.assign({}, STANDARD_EINSTELLUNGEN, lesen(SPEICHER.einstellungen, {}));
   zustand.status = lesen(SPEICHER.status, null);
   zustand.schritteServer = lesen(SPEICHER.schritte, []);
   schritteZusammenfuehren();
@@ -327,10 +337,31 @@ function schritteNativ() {
 /** Schritte aus dem Sheet, überschrieben mit den frischeren Werten vom Handy. */
 function schritteZusammenfuehren() {
   const m = new Map();
-  (zustand.schritteServer || []).forEach(([tag, n]) => m.set(tag, n));
+  const abzug = new Map(); // Schritte während Aktivitäten (vom Server berechnet)
+  (zustand.schritteServer || []).forEach(z => {
+    m.set(z[0], z[1]);
+    if (typeof z[2] === 'number') abzug.set(z[0], Math.max(0, z[1] - z[2]));
+  });
   const nativ = schritteNativ();
   if (nativ && nativ.tage) Object.entries(nativ.tage).forEach(([tag, n]) => m.set(tag, n));
   zustand.schritte = m;
+  const alltag = new Map();
+  m.forEach((n, tag) => {
+    const a = Math.max(0, n - (abzug.get(tag) || 0));
+    alltag.set(tag, { alltag: a, pkt: alltagPunkte(a, n), unplausibel: n > SCHRITTE_MAX });
+  });
+  zustand.alltag = alltag;
+  zustand.index = null;
+}
+
+/**
+ * Alltagspunkte eines Tages: max(0, Alltagsschritte − frei) / Schritte pro Punkt, abgerundet.
+ * Gleiche Formel wie alltagPunkte_ in gas/Schritte.gs.
+ */
+function alltagPunkte(alltag, schritte) {
+  const e = zustand.einstellungen;
+  if (!Number(e.alltagPunkte) || schritte > SCHRITTE_MAX || !Number(e.alltagProPunkt)) return 0;
+  return Math.floor(Math.max(0, alltag - Number(e.alltagFrei)) / Number(e.alltagProPunkt));
 }
 
 /** Schritte der Tage im Zeitraum [von, bis), nur Tage mit Wert. */
@@ -338,7 +369,7 @@ function schritteZeitraum(von, bis) {
   const werte = [];
   for (let d = tagePlus(von, 0); d < bis; d = tagePlus(d, 1)) {
     const v = zustand.schritte.get(schluessel(d));
-    if (v !== undefined) werte.push(v);
+    if (v !== undefined && v <= SCHRITTE_MAX) werte.push(v);
   }
   return werte;
 }
@@ -452,7 +483,7 @@ const BESTZEIT_DISTANZEN = [
   { name: '5 km', km: 5, feld: 's5k' },
   { name: '10 km', km: 10, feld: 's10k' }
 ];
-const LEERE_WOCHE = { laeufe: 0, pkt: 0, hatPkt: false, geschaetzt: false, sportarten: new Set(), min: 0, km: { laufen: 0, rad: 0, wandern: 0 } };
+const LEERE_WOCHE = { laeufe: 0, pkt: 0, sport: 0, alltag: 0, hatPkt: false, geschaetzt: false, sportarten: new Set(), min: 0, km: { laufen: 0, rad: 0, wandern: 0 } };
 
 /** Wochen (Schlüssel = Montag als YYYY-MM-DD) mit Läufen, Sportpunkten und Sportarten. */
 function wochenIndex() {
@@ -462,7 +493,7 @@ function wochenIndex() {
     const k = schluessel(montag(a.datum));
     let w = m.get(k);
     if (!w) {
-      w = { laeufe: 0, pkt: 0, hatPkt: false, geschaetzt: false, sportarten: new Set(), min: 0, km: { laufen: 0, rad: 0, wandern: 0 } };
+      w = { laeufe: 0, pkt: 0, sport: 0, alltag: 0, hatPkt: false, geschaetzt: false, sportarten: new Set(), min: 0, km: { laufen: 0, rad: 0, wandern: 0 } };
       m.set(k, w);
     }
     if (a.sportart === 'laufen') w.laeufe++;
@@ -472,10 +503,24 @@ function wochenIndex() {
     }
     if (typeof a.pkt === 'number') {
       w.pkt += a.pkt;
+      w.sport += a.pkt;
       w.hatPkt = true;
       if (a.pktGeschaetzt) w.geschaetzt = true;
     }
     if (a.sportart !== 'andere') w.sportarten.add(a.sportart);
+  });
+  // Alltagspunkte aus Handy-Schritten
+  (zustand.alltag || new Map()).forEach((x, tag) => {
+    if (!x.pkt) return;
+    const k = schluessel(montag(lokalesDatum(tag)));
+    let w = m.get(k);
+    if (!w) {
+      w = { laeufe: 0, pkt: 0, sport: 0, alltag: 0, hatPkt: false, geschaetzt: false, sportarten: new Set(), min: 0, km: { laufen: 0, rad: 0, wandern: 0 } };
+      m.set(k, w);
+    }
+    w.pkt += x.pkt;
+    w.alltag += x.pkt;
+    w.hatPkt = true;
   });
   zustand.index = m;
   return m;
@@ -575,11 +620,11 @@ function bestmarken() {
   proTag.forEach(t => { if (!hmBest || t.hm > hmBest.hm) hmBest = t; });
   if (hmBest) ergebnis.weitere.push({ titel: 'Meiste Höhenmeter an einem Tag', wert: zahlFormat0.format(hmBest.hm) + ' m', unter: '', datum: hmBest.datum });
 
-  // Meiste Sportpunkte in einer Woche
+  // Meiste Punkte (Sport + Alltag) in einer Woche
   let pktBest = null;
   wochenIndex().forEach((w, k) => { if (w.hatPkt && (!pktBest || w.pkt > pktBest.pkt)) pktBest = { pkt: w.pkt, datum: lokalesDatum(k), geschaetzt: w.geschaetzt }; });
   if (pktBest) {
-    ergebnis.weitere.push({ titel: 'Meiste Sportpunkte in einer Woche', wert: (pktBest.geschaetzt ? '≈ ' : '') + pktBest.pkt,
+    ergebnis.weitere.push({ titel: 'Meiste Punkte in einer Woche', wert: (pktBest.geschaetzt ? '≈ ' : '') + pktBest.pkt,
       unter: '', datum: pktBest.datum, datumText: 'KW ' + kalenderwoche(pktBest.datum) + '/' + pktBest.datum.getFullYear() });
   }
   return ergebnis;
@@ -713,7 +758,7 @@ function wochendaten(versatz) {
   const wi = woche(start);
   return {
     start, ende: tagePlus(start, 6), liste, summen, tage, ziel, laeufe, restTage,
-    pkt: wi.pkt, hatPkt: wi.hatPkt, geschaetzt: wi.geschaetzt, sportarten: wi.sportarten,
+    pkt: wi.pkt, sport: wi.sport, alltag: wi.alltag, hatPkt: wi.hatPkt, geschaetzt: wi.geschaetzt, sportarten: wi.sportarten,
     zielPunkte: Number(zustand.einstellungen.wochenzielPunkte) || 0
   };
 }
@@ -894,12 +939,12 @@ function serieZeile(s, name) {
 /** Aktivziel: Sportpunkte der Woche. */
 function punkteKarte(w) {
   if (w.ende < PUNKTE_START) {
-    return '<section class="karte" style="margin-top:12px"><p class="leise" style="margin:0">Sportpunkte gibt es ab 2023 (Intensitätsminuten von Garmin).</p></section>';
+    return '<section class="karte" style="margin-top:12px"><p class="leise" style="margin:0">Punkte gibt es ab 2023 (Intensitätsminuten von Garmin).</p></section>';
   }
   const ziel = w.zielPunkte;
   const ca = w.geschaetzt ? '<span class="ca">≈</span>' : '';
   if (!ziel) {
-    return `<section class="karte" style="margin-top:12px"><div class="ziel-zeile"><div class="ziel-zahl">${ca}${w.pkt} <small>Sportpunkte</small></div><span class="ziel-art">Aktivziel</span></div>
+    return `<section class="karte" style="margin-top:12px"><div class="ziel-zeile"><div class="ziel-zahl">${ca}${w.pkt} <small>Punkte</small></div><span class="ziel-art">Aktivziel</span></div>
       <p class="leise">Kein Aktivziel gesetzt (Einstellungen).</p></section>`;
   }
   const anteil = Math.min(1, w.pkt / ziel);
@@ -923,6 +968,7 @@ function punkteKarte(w) {
     </div>
     <div class="balken" style="--farbe: var(--aktiv)"><span style="width:${(anteil * 100).toFixed(1)}%"></span></div>
     <div class="ziel-text ${klasse}">${text}</div>
+    ${w.alltag ? `<p class="leise klein-text">${w.sport} Sportpunkte + ${w.alltag} Alltagspunkte (Schritte)</p>` : ''}
     ${schnittZeile(w)}
     ${w.geschaetzt ? '<p class="leise klein-text">≈ enthält geschätzte Punkte für Aktivitäten ohne Intensitätsminuten.</p>' : ''}
     ${zustand.wocheVersatz === 0 ? serieZeile(seriePunkte(), 'Aktivziel') : ''}
@@ -973,7 +1019,7 @@ function schritteKarte(w) {
       <div class="ziel-zahl klein">${zahlFormat0.format(schnittWoche)} <small>Schritte pro Tag</small></div>
       <span class="ziel-art">Schritte</span>
     </div>
-    <p class="klein-text" style="margin-top:6px">${vergleich}${zustand.wocheVersatz === 0 && heute !== undefined ? '<br><span class="leise">heute bisher ' + zahlFormat0.format(heute) + '</span>' : ''}</p>
+    <p class="klein-text" style="margin-top:6px">${vergleich}${zustand.wocheVersatz === 0 && heute !== undefined ? '<br><span class="leise">heute bisher ' + zahlFormat0.format(heute) + '</span>' : ''}${w.alltag ? '<br><span class="leise">Alltagspunkte diese Woche: ' + w.alltag + '</span>' : ''}</p>
   </section>`;
 }
 
@@ -1115,7 +1161,17 @@ function ansichtEinstellungen() {
     ${zaehlerHtml(ziel, 'ziel-minus', 'ziel-plus', 0, 14, 'Läufe pro Woche', 'Laufziel, Montag bis Sonntag')}
   </section>
   <section class="karte">
-    ${zaehlerHtml(zielPunkte, 'punkte-minus', 'punkte-plus', 0, 1000, 'Sportpunkte pro Woche', 'Aktivziel, Schritte von 10 · Garmin/WHO: 150')}
+    ${zaehlerHtml(zielPunkte, 'punkte-minus', 'punkte-plus', 0, 1000, 'Punkte pro Woche', 'Aktivziel: Sport + Alltag · Garmin/WHO: 150')}
+  </section>
+  <section class="karte">
+    <label class="schalter-zeile">
+      <span><b>Alltagspunkte aus Schritten</b><small>Handy-Schritte außerhalb aufgezeichneter Aktivitäten zählen zum Aktivziel</small></span>
+      <input type="checkbox" data-einst="alltagPunkte" ${Number(zustand.einstellungen.alltagPunkte) ? 'checked' : ''} ${v.token ? '' : 'disabled'}>
+    </label>
+    <div class="${Number(zustand.einstellungen.alltagPunkte) ? '' : 'aus'}">
+      ${zaehlerHtml(Number(zustand.einstellungen.alltagFrei), 'frei-minus', 'frei-plus', 0, 20000, 'Schritte frei pro Tag', 'Grundbewegung ohne Punkte · Standard 3000')}
+      ${zaehlerHtml(Number(zustand.einstellungen.alltagProPunkt), 'propunkt-minus', 'propunkt-plus', 20, 2000, 'Schritte pro Punkt', 'Standard 200 · 7000–8000 Schritte/Tag ≈ 150 pro Woche')}
+    </div>
   </section>
 
   ${benachrichtigungenHtml()}
@@ -1284,6 +1340,7 @@ function ansichtDetail() {
   if (a.minGesamt && a.min && a.minGesamt - a.min >= 1) kz.push(kennzahl(dauer(a.minGesamt), 'Gesamtzeit'));
   if (d.vMaxMs && !lauf) kz.push(kennzahl(dezimal1.format(d.vMaxMs * 3.6) + ' km/h', 'Max. Geschwindigkeit'));
   html += '<div class="kennzahlen">' + kz.join('') + '</div>';
+  html += detailSpurHtml(a);
 
   if (zustand.detailLaedt) return html + '<p class="leise stand">Lade Details …</p>';
   if (zustand.detailFehler) return html + `<p class="hinweis-fehler stand">${esc(zustand.detailFehler)}</p>`;
@@ -1355,10 +1412,12 @@ function ansichtDetail() {
 function zeichnen() {
   const inhalt = document.getElementById('inhalt');
   const ansichten = {
-    einstellungen: ansichtEinstellungen, erfolge: ansichtErfolge, form: ansichtForm,
+    einstellungen: ansichtEinstellungen, erfolge: ansichtErfolge, form: ansichtForm, karte: ansichtKarte,
     detail: ansichtDetail, hilfe: ansichtHilfe, woche: ansichtWoche
   };
   inhalt.innerHTML = (ansichten[zustand.ansicht] || ansichtWoche)();
+  if (zustand.ansicht === 'karte') karteNachZeichnen();
+  if (zustand.ansicht === 'detail' && zustand.detailId) detailKarteNachZeichnen(zustand.detailId);
   // Detail und Erklärungen gehören zur Ansicht, aus der sie geöffnet wurden
   const reiter = (zustand.ansicht === 'detail' || zustand.ansicht === 'hilfe') ? zustand.vorherigeAnsicht : zustand.ansicht;
   document.querySelectorAll('.leiste-knopf').forEach(k => {
@@ -1380,20 +1439,27 @@ function meldung(text) {
 
 let zielSpeichernZeit = null;
 
-/** Ändert ein Wochenziel sofort in der App und speichert kurz danach im Sheet. */
-function zielAendern(schluessel, delta, max, name) {
+/** Ändert eine Einstellung um delta (zwischen min und max) und speichert sie. */
+function zielAendern(schluessel, delta, max, name, min) {
   const alt = Number(zustand.einstellungen[schluessel]) || 0;
-  const neu = Math.min(max, Math.max(0, alt + delta));
+  const neu = Math.min(max, Math.max(min || 0, alt + delta));
   if (neu === alt) return;
+  einstellungAendern(schluessel, neu, name);
+}
+
+/** Setzt eine Einstellung sofort in der App und speichert sie kurz danach im Sheet. */
+function einstellungAendern(schluessel, neu, name) {
   zustand.einstellungen[schluessel] = neu;
+  schritteZusammenfuehren(); // Alltagspunkte hängen von den Einstellungen ab
   zeichnen();
   // Mehrfaches Tippen zusammenfassen
   clearTimeout(zielSpeichernZeit);
   zielSpeichernZeit = setTimeout(async () => {
     try {
       const antwort = await api('einstellungSetzen', { schluessel: schluessel, wert: zustand.einstellungen[schluessel] });
-      zustand.einstellungen = antwort.einstellungen;
-      schreiben(SPEICHER.einstellungen, antwort.einstellungen);
+      zustand.einstellungen = Object.assign({}, STANDARD_EINSTELLUNGEN, antwort.einstellungen);
+      schreiben(SPEICHER.einstellungen, zustand.einstellungen);
+      schritteZusammenfuehren();
       meldung(name + ' gespeichert: ' + antwort.einstellungen[schluessel]);
     } catch (e) {
       zustand.einstellungen = Object.assign({}, zustand.einstellungen, lesen(SPEICHER.einstellungen, {}));
@@ -1431,6 +1497,14 @@ document.addEventListener('click', ereignis => {
     case 'ziel-plus': zielAendern('wochenzielLaeufe', 1, 14, 'Laufziel'); break;
     case 'punkte-minus': zielAendern('wochenzielPunkte', -10, 1000, 'Aktivziel'); break;
     case 'punkte-plus': zielAendern('wochenzielPunkte', 10, 1000, 'Aktivziel'); break;
+    case 'frei-minus': zielAendern('alltagFrei', -500, 20000, 'Schritte frei'); break;
+    case 'frei-plus': zielAendern('alltagFrei', 500, 20000, 'Schritte frei'); break;
+    case 'propunkt-minus': zielAendern('alltagProPunkt', -25, 2000, 'Schritte pro Punkt', 20); break;
+    case 'propunkt-plus': zielAendern('alltagProPunkt', 25, 2000, 'Schritte pro Punkt', 20); break;
+    case 'karte-filter':
+      karteZustand.filter[ziel.dataset.sportart] = !karteZustand.filter[ziel.dataset.sportart];
+      zeichnen();
+      break;
     case 'von-garmin': vonGarminHolen(); break;
     case 'verbindung-loeschen':
       if (confirm('Verbindung und gespeicherte Daten auf diesem Gerät löschen?')) {
@@ -1447,6 +1521,13 @@ document.addEventListener('click', ereignis => {
 // Benachrichtigungs-Einstellungen sofort speichern
 document.addEventListener('change', ereignis => {
   if (ereignis.target.closest('[data-nb]') && inApp()) benachrichtigungenSpeichern();
+  const einst = ereignis.target.closest('[data-einst]');
+  if (einst) einstellungAendern(einst.dataset.einst, einst.checked ? 1 : 0, 'Alltagspunkte');
+  if (ereignis.target.closest('[data-karte="jahr"]')) {
+    karteZustand.jahr = ereignis.target.value;
+    karteZustand.sicht = null; // auf die Spuren des Jahres zoomen
+    zeichnen();
+  }
 });
 
 document.addEventListener('submit', async ereignis => {

@@ -1,6 +1,6 @@
 /*
  * Schritte.kt – Schrittzähler des Handys
- * Version: 0.8.0 (2026-11-18)
+ * Version: 0.9.0 (2026-11-18)
  *
  * Liest den Hardware-Schrittzähler (Sensor.TYPE_STEP_COUNTER). Er zählt seit dem letzten
  * Neustart des Handys ständig mit und braucht praktisch keinen Akku. Die App liest ihn
@@ -13,6 +13,10 @@
  * Gespeichert werden die letzten 120 Tage im privaten App-Speicher; übertragen werden
  * die letzten 14 Tage an die Web-App (Aktion „schritteSetzen“).
  * Gezählt wird erst ab dem ersten Lesen nach der Installation.
+ * Ab 0.9.0 merkt sich die App zusätzlich jede Messung als Zeitabschnitt (von, bis, Schritte)
+ * und schickt die Abschnitte der letzten 3 Tage mit. Die Web-App zieht damit die Schritte
+ * ab, die während einer aufgezeichneten Garmin-Aktivität gezählt wurden (Alltagsschritte).
+ * Übertragung per POST, weil die Abschnitte nicht in eine URL passen.
  */
 package de.obitus.sport
 
@@ -25,6 +29,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Handler
 import android.os.HandlerThread
+import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
 import java.time.LocalDate
@@ -36,6 +41,8 @@ object Schritte {
     private val ZONE: ZoneId = ZoneId.of("Europe/Zurich")
     private const val TAGE_BEHALTEN = 120L
     private const val TAGE_SENDEN = 14L
+    private const val ABSCHNITTE_TAGE = 4L   // so lange behalten
+    private const val ABSCHNITTE_SENDEN = 3L // so viele Tage mitschicken
     private const val MAX_PRO_LESEN = 80_000f // mehr ist kein Gehen, sondern ein Fehler
 
     fun erlaubt(c: Context): Boolean =
@@ -90,7 +97,10 @@ object Schritte {
             val letztZeit = p.getLong("schritte_letzt_zeit", jetzt)
             var neu = roh - letztWert
             if (neu < 0) neu = roh // Neustart des Handys: Zähler begann wieder bei 0
-            if (neu in 1f..MAX_PRO_LESEN) verbuchen(tage, neu.toLong(), letztZeit, jetzt)
+            if (neu in 1f..MAX_PRO_LESEN) {
+                verbuchen(tage, neu.toLong(), letztZeit, jetzt)
+                abschnittMerken(c, letztZeit, jetzt, neu.toLong())
+            }
         }
         // Alte Tage entfernen
         val grenze = LocalDate.now(ZONE).minusDays(TAGE_BEHALTEN).toString()
@@ -124,6 +134,25 @@ object Schritte {
         }
     }
 
+    /** Zeitabschnitte [von ms, bis ms, Schritte] der letzten Tage. */
+    fun abschnitte(c: Context): JSONArray = try {
+        JSONArray(Speicher.prefs(c).getString("schritte_abschnitte", "[]") ?: "[]")
+    } catch (e: Exception) {
+        JSONArray()
+    }
+
+    private fun abschnittMerken(c: Context, von: Long, bis: Long, anzahl: Long) {
+        val grenze = System.currentTimeMillis() - ABSCHNITTE_TAGE * 24 * 3_600_000L
+        val alt = abschnitte(c)
+        val neu = JSONArray()
+        for (i in 0 until alt.length()) {
+            val a = alt.optJSONArray(i) ?: continue
+            if (a.optLong(1) >= grenze) neu.put(a)
+        }
+        neu.put(JSONArray().put(von).put(bis).put(anzahl))
+        Speicher.prefs(c).edit().putString("schritte_abschnitte", neu.toString()).apply()
+    }
+
     /** Die letzten 14 Tage als JSON für die Web-App. */
     fun zumSenden(c: Context): JSONObject {
         val alle = tage(c)
@@ -133,11 +162,18 @@ object Schritte {
         return auswahl
     }
 
-    /** Überträgt die letzten Tage an die Web-App. Liefert die Anzahl übertragener Tage. */
+    /** Überträgt die letzten Tage und Abschnitte an die Web-App. Liefert die Anzahl Tage. */
     fun senden(c: Context): Int {
         val daten = zumSenden(c)
         if (daten.length() == 0) return 0
-        Netz.webApp(c, "schritteSetzen", mapOf("daten" to daten.toString()))
+        val grenze = System.currentTimeMillis() - ABSCHNITTE_SENDEN * 24 * 3_600_000L
+        val alle = abschnitte(c)
+        val abschnitte = JSONArray()
+        for (i in 0 until alle.length()) {
+            val a = alle.optJSONArray(i) ?: continue
+            if (a.optLong(1) >= grenze) abschnitte.put(a)
+        }
+        Netz.webAppPost(c, "schritteSetzen", JSONObject().put("daten", daten).put("abschnitte", abschnitte))
         Speicher.prefs(c).edit().putLong("schritte_gesendet", System.currentTimeMillis()).apply()
         return daten.length()
     }

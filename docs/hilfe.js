@@ -1,6 +1,6 @@
 /**
  * hilfe.js – Erklär-Seite „So funktioniert die App“
- * Version: 0.8.0 (2026-11-18)
+ * Version: 0.9.0 (2026-11-18)
  *
  * Erreichbar über das „?“ in „Form“ und „Erfolge“ sowie über die Einstellungen.
  * Werte wie Ziele und Grenzen werden aus app.js gelesen, damit der Text stimmt,
@@ -33,9 +33,15 @@ function ansichtHilfe() {
       <p><b>≈ geschätzt:</b> Hat Garmin für eine Aktivität keine Intensitätsminuten (z. B. ohne Pulsmessung), schätzt die App sie aus der Dauer: Minuten × dein persönlicher Durchschnitt für diese Sportart.</p>
       <p>Sportpunkte gibt es <b>ab 2023</b>. Davor hat Garmin keine Intensitätsminuten gespeichert.</p>`)}
 
+    ${abschnitt('Alltagspunkte aus Schritten', `
+      <p>Auch Bewegung im Alltag zählt: Die Android-App zählt die Schritte des Handys. Schritte, die während einer aufgezeichneten Garmin-Aktivität gezählt wurden, zieht die App ab – dafür gibt es schon Sportpunkte von der Uhr.</p>
+      <p>Aus den übrigen <b>Alltagsschritten</b> werden Punkte: Die ersten <b>${zahlFormat0.format(Number(zustand.einstellungen.alltagFrei))} Schritte</b> am Tag zählen nicht (Grundbewegung), danach gibt es <b>1 Punkt pro ${zahlFormat0.format(Number(zustand.einstellungen.alltagProPunkt))} Schritte</b>. ${Number(zustand.einstellungen.alltagPunkte) ? '' : '<b>Zurzeit ausgeschaltet.</b>'}</p>
+      <p>Warum diese Zahlen: Studien setzen 7000–8000 Schritte pro Tag ungefähr mit den empfohlenen 150 Minuten moderater Bewegung pro Woche gleich (WHO, z. B. Tudor-Locke 2011). Mit den Standardwerten ergeben 7000–8000 Schritte täglich 140–175 Alltagspunkte pro Woche, also etwa das Aktivziel von 150. Zügiges Gehen mit rund 100 Schritten pro Minute gilt als moderate Bewegung; Garmin und Google Fit („Herzpunkte“) zählen nach dem gleichen Prinzip.</p>
+      <p>Alle Werte lassen sich unter Einstellungen ändern oder ganz ausschalten. Tage mit mehr als ${zahlFormat0.format(SCHRITTE_MAX)} Schritten gelten als unrealistisch und zählen nicht.</p>`)}
+
     ${abschnitt('Die zwei Wochenziele', `
       <p><b>Laufziel:</b> ${zielL} ${zielL === 1 ? 'Lauf' : 'Läufe'} pro Woche. Laufband zählt mit.</p>
-      <p><b>Aktivziel:</b> ${zielP} Sportpunkte pro Woche, egal mit welcher Sportart. 150 ist die Empfehlung von Garmin und der WHO.</p>
+      <p><b>Aktivziel:</b> ${zielP} Punkte pro Woche: Sportpunkte (jede Sportart) plus Alltagspunkte (Schritte). 150 ist die Empfehlung von Garmin und der WHO.</p>
       <p>Beide Ziele änderst du unter Einstellungen. Sie gelten auf allen Geräten.</p>`)}
 
     ${abschnitt('Serien und Abzeichen', `
@@ -74,6 +80,11 @@ function ansichtHilfe() {
       <p>Die Android-App liest den eingebauten Schrittzähler des Handys. Er zählt ohnehin ständig mit und braucht praktisch keinen Akku; GPS wird nicht verwendet.</p>
       <p>Gezählt wird nur, wenn du das Handy dabei hast, und erst ab der Installation. Die Schritte der Garmin-Uhr zählen nicht dazu, damit nichts doppelt zählt.</p>
       <p>In der Wochenansicht siehst du die Schritte pro Tag und den Wochenschnitt im Vergleich zu den 90 Tagen davor; unter „Form“ die letzten 28 Tage im Vergleich zu deinem Schnitt (ab 3 Wochen Daten). Schritte zählen nicht als Sportpunkte.</p>`)}
+
+    ${abschnitt('Karte', `
+      <p>Die Karte zeigt alle aufgezeichneten Spuren von Wanderungen, Radfahrten, Skitagen und (zuschaltbar) Läufen. Wo du oft warst, überlagern sich die Linien und werden kräftiger – eine Heatmap deiner Wege.</p>
+      <p>Über das Symbol oben rechts in der Karte blendest du die <b>offiziellen Wanderwege der Schweiz</b> (swisstopo) ein: So siehst du, wo es Wege gibt, auf denen du noch nicht warst. Als Grundkarte gibt es die Landeskarte von swisstopo oder OpenStreetMap.</p>
+      <p>Die Spuren kommen aus den Originaldateien der Uhr. Beim ersten Mal lädt die App die ganze Historie im Hintergrund nach; das kann ein paar Stunden dauern. Unrealistische Aktivitäten (z. B. Autofahrt mit laufender Aufzeichnung) erscheinen nicht.</p>`)}
 
     ${abschnitt('Werte in der Detailansicht', `
       <p><b>Pulszonen:</b> wie lange du in welchem Pulsbereich warst, von Zone 1 (Aufwärmen) bis Zone 5 (Maximum).</p>

@@ -1,6 +1,6 @@
 /**
  * Sammler.gs – Aktivitäten von Garmin ins Sheet „Aktivitaeten" übernehmen
- * Version: 0.4.0 (2026-11-17)
+ * Version: 0.9.0 (2026-11-18)
  *
  * Funktionen zum Ausführen im Script-Editor:
  * - sammelnTrockenlauf()  Diagnose: holt die Daten, schreibt nichts, loggt nur Zählungen
@@ -24,6 +24,8 @@
  * Änderungen 0.4.0: neue Spalte „details“ (JSON mit Puls, Pulszonen, Trainingseffekt,
  *   Intensitätsminuten, Laufstil, Bestzeiten …), detailsNachtragen(). Eine bestehende
  *   Kopfzeile ohne „details“ wird automatisch ergänzt.
+ * Änderungen 0.9.0: Nach dem Import werden die GPS-Spuren neuer Aktivitäten geladen
+ *   (Spuren.gs, Standard höchstens 60 Sekunden, aus der App 20 Sekunden).
  *
  * Das Sheet „Sport-Daten" legt das Skript beim ersten Lauf selbst an und merkt sich
  * die ID in der Script Property SHEET_ID. Ein bestehendes Sheet kann genutzt werden,
@@ -128,7 +130,8 @@ function statusZeigen() {
 
 /**
  * @param {boolean} trocken true = nichts schreiben, nur loggen
- * @param {{mail: (boolean|undefined)}=} optionen mail: false = keine Fehler-Mail (Standard: Mail)
+ * @param {{mail: (boolean|undefined), spurenSekunden: (number|undefined)}=} optionen
+ *   mail: false = keine Fehler-Mail (Standard: Mail); spurenSekunden: Zeit für Spuren (Standard 60)
  * @return {{neu: number, proSportart: Object, ausgeschlossen: number, fehler: (string|null)}}
  */
 function sammelnIntern_(trocken, optionen) {
@@ -145,7 +148,7 @@ function sammelnIntern_(trocken, optionen) {
   const t0 = Date.now();
 
   try {
-    log_('===== Sammler v0.4.0 ' + (trocken ? 'TROCKENLAUF (schreibt nichts)' : 'gestartet') + ' =====');
+    log_('===== Sammler v0.9.0 ' + (trocken ? 'TROCKENLAUF (schreibt nichts)' : 'gestartet') + ' =====');
     const blatt = trocken ? blattOhneAnlegen_() : blatt_();
     const bekannt = bekannteIds_(blatt);
     const voll = bekannt.size === 0;
@@ -195,6 +198,11 @@ function sammelnIntern_(trocken, optionen) {
     } else {
       if (neu.length) schreiben_(blatt, neu);
       sportartenAktualisieren_(blatt, false);
+      try {
+        spurenNachladen(optionen.spurenSekunden || 60, 30);
+      } catch (spurFehler) {
+        log_('Spuren konnten nicht geladen werden: ' + spurFehler.message);
+      }
       props.setProperties({
         LETZTER_IMPORT: Utilities.formatDate(jetzt, ZEITZONE, 'yyyy-MM-dd HH:mm:ss'),
         LETZTER_IMPORT_NEU: String(neu.length),

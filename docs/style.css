@@ -1,4 +1,4 @@
-/* style.css – Sport-App, Version 0.8.0 (2026-11-18) */
+/* style.css – Sport-App, Version 0.9.0 (2026-11-18) */
 
 :root {
   --hintergrund: #f6f5f2;
@@ -304,6 +304,23 @@ button.bestmarke { cursor: pointer; }
 .zeit-wahl.aus { opacity: 0.45; }
 .zeit-wahl select { font: inherit; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--linie); background: var(--hintergrund); color: var(--text); }
 a.knopf { text-decoration: none; }
+
+/* Karte */
+.filter-reihe { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+.chip {
+  border: 1.5px solid var(--farbe, var(--linie)); background: none; color: var(--text);
+  border-radius: 999px; padding: 6px 12px; font-weight: 600; font-size: 0.875rem; cursor: pointer;
+}
+.chip.an { background: var(--farbe); color: #fff; }
+.filter-reihe select { font: inherit; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--linie); background: var(--flaeche); color: var(--text); }
+.karte-flaeche { height: 62vh; min-height: 320px; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--linie); background: var(--flaeche-2); }
+.karte-info { margin: 10px 0 0; }
+.karte-detail-rahmen { padding: 0; overflow: hidden; }
+.detail-karte { height: 260px; }
+.leer-karte { display: grid; place-items: center; }
+.leaflet-container { font: inherit; }
+.popup-knopf { margin-top: 8px; }
+.aus { opacity: 0.45; }
 
 /* Erklärungen */
 .hilfe p { margin: 0 0 10px; }

@@ -1,6 +1,6 @@
 /**
  * WebApp.gs – Schnittstelle für die App (JSON)
- * Version: 0.8.0 (2026-11-18)
+ * Version: 0.9.0 (2026-11-18)
  *
  * Aufruf: GET <webapp-url>?token=<WEBAPP_TOKEN>&aktion=<aktion>&...
  *
@@ -14,7 +14,9 @@
  * | details           | Zusatzwerte einer Aktivität (id): {id, details: {…}}            |
  * | meldung           | Text einer Benachrichtigung (art, seit), siehe Meldungen.gs      |
  * | schritteSetzen    | Schritte pro Tag vom Handy speichern (daten), siehe Schritte.gs  |
- * | schritte          | alle Schritte pro Tag: {tage: [[datum, schritte], …]}            |
+ * | schritte          | alle Tage: {tage: [[datum, schritte, alltag, punkte, unplausibel]]} |
+ * | spuren            | alle groben Spuren für die Karte: {spuren: [[id, sportart, datum, polyline]], offen} |
+ * | spur              | feine Spur einer Aktivität (id): {fein}                         |
  *
  * Jede Antwort ist JSON: {ok: true, version, …} oder {ok: false, fehler}.
  * Ohne gültiges Token liefert die Web-App keine Daten.
@@ -38,9 +40,12 @@
  *   Unrealistische Aktivitäten (meldungPlausibel_ in Meldungen.gs) bekommen keine
  *   geschätzten Sportpunkte mehr, nur echte Intensitätsminuten.
  * Änderungen 0.8.0: Aktionen „schritteSetzen“ und „schritte“ (Schrittzähler der Android-App).
+ * Änderungen 0.9.0: POST (doPost) mit JSON-Rumpf für größere Daten (Schrittabschnitte);
+ *   Einstellungen alltagPunkte, alltagFrei, alltagProPunkt; Aktionen „spuren“ und „spur“;
+ *   „sammeln“ lädt auch die Spuren neuer Aktivitäten (höchstens 20 Sekunden).
  */
 
-const WEBAPP_VERSION = '0.8.0';
+const WEBAPP_VERSION = '0.9.0';
 const PUNKTE_AB_JAHR = 2023;
 const BLATT_KONFIGURATION = 'Konfiguration';
 
@@ -60,10 +65,37 @@ const EINSTELLUNGEN = {
   },
   wochenzielPunkte: {
     standard: 150,
-    beschreibung: 'Sportpunkte (Intensitätsminuten) pro Woche',
+    beschreibung: 'Punkte pro Woche (Sportpunkte + Alltagspunkte)',
     pruefen: function (w) {
       const n = Number(w);
       if (!Number.isInteger(n) || n < 0 || n > 3000) throw new Error('wochenzielPunkte muss eine ganze Zahl von 0 bis 3000 sein.');
+      return n;
+    }
+  },
+  alltagPunkte: {
+    standard: 1,
+    beschreibung: 'Alltagspunkte aus Handy-Schritten zählen (1 = ja, 0 = nein)',
+    pruefen: function (w) {
+      const n = Number(w);
+      if (n !== 0 && n !== 1) throw new Error('alltagPunkte muss 0 oder 1 sein.');
+      return n;
+    }
+  },
+  alltagFrei: {
+    standard: 3000,
+    beschreibung: 'Schritte pro Tag ohne Punkte (Grundbewegung)',
+    pruefen: function (w) {
+      const n = Number(w);
+      if (!Number.isInteger(n) || n < 0 || n > 20000) throw new Error('alltagFrei muss eine ganze Zahl von 0 bis 20000 sein.');
+      return n;
+    }
+  },
+  alltagProPunkt: {
+    standard: 200,
+    beschreibung: 'Schritte pro Alltagspunkt',
+    pruefen: function (w) {
+      const n = Number(w);
+      if (!Number.isInteger(n) || n < 20 || n > 2000) throw new Error('alltagProPunkt muss eine ganze Zahl von 20 bis 2000 sein.');
       return n;
     }
   }
@@ -78,7 +110,25 @@ const APP_SPALTEN = ['id', 'start', 'sportart', 'typ', 'name', 'km', 'min', 'min
 // ---------------------------------------------------------------------------
 
 function doGet(e) {
-  const p = (e && e.parameter) || {};
+  return antwort_((e && e.parameter) || {});
+}
+
+/** POST: Token und Aktion in der URL, weitere Daten als JSON im Rumpf. */
+function doPost(e) {
+  const p = Object.assign({}, (e && e.parameter) || {});
+  try {
+    const rumpf = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    Object.keys(rumpf).forEach(function (k) {
+      if (k !== 'token' && k !== 'aktion') p[k] = rumpf[k];
+    });
+  } catch (fehler) {
+    return ContentService.createTextOutput(JSON.stringify({ ok: false, fehler: 'Rumpf ist kein JSON' }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  return antwort_(p);
+}
+
+function antwort_(p) {
   let antwort;
   try {
     if (!tokenGueltig_(p.token)) {
@@ -155,12 +205,16 @@ function aktionAusfuehren_(p) {
       return Object.assign(basis, schritteSetzen_(p));
     case 'schritte':
       return Object.assign(basis, schritteLesen_());
+    case 'spuren':
+      return Object.assign(basis, spurenFuerKarte_());
+    case 'spur':
+      return Object.assign(basis, { id: String(p.id) }, spurFein_(p.id));
     case 'meldung':
       return Object.assign(basis, { meldung: meldung_(p) });
     case 'details':
       return Object.assign(basis, { id: String(p.id), details: detailsLesen_(p.id) });
     case 'sammeln': {
-      const e = sammelnIntern_(false, { mail: false });
+      const e = sammelnIntern_(false, { mail: false, spurenSekunden: 20 });
       if (e.fehler) throw new Error(e.fehler);
       return Object.assign(basis, { neu: e.neu, proSportart: e.proSportart });
     }

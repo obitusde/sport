@@ -1,6 +1,6 @@
 # PROJEKT.md – Sport-Tracker (Arbeitstitel „sport")
 
-Version: 0.8.0 (2026-11-18) – v0.8 Schrittzähler gebaut
+Version: 0.9.0 (2026-11-18) – v0.9 Alltagspunkte und Karte gebaut
 
 Dieses Dokument ist die Grundlage für die Entwicklung mit Claude Code. Es beschreibt Ziele, Architektur, Arbeitsweise und Fahrplan. Claude Code liest es vor jeder Arbeit und hält es aktuell.
 
@@ -31,7 +31,7 @@ Epix / Tacho → Garmin Connect (unverändert)
    Apps Script „Sammler"
      • Zugriffstoken holen (24 h gültig)
      • neue Aktivitäten → Sheet „Aktivitaeten"
-     • volle GPS-Spur → Drive (GeoJSON, privat)
+     • GPS-Spuren aus den FIT-Dateien → Blatt „Spuren“ (ab v0.9, statt Drive)
                      ↓
    Apps Script Web-App (doGet, prüft Web-App-Token)
      • liefert Liste, Wochenwerte, Spuren als JSON
@@ -136,6 +136,8 @@ Epix / Tacho → Garmin Connect (unverändert)
 - **Android-App als Hülle** (entschieden 2026-11-18): APK mit WebView um die bestehende PWA, damit die Oberfläche eine Codebasis bleibt und ohne neue APK aktualisiert wird. Nativ nur: Benachrichtigungen, Update-Prüfung, (v0.8) Schrittzähler. Gebaut von `.github/workflows/android.yml`; versionCode = Laufnummer der Action; Release-Tag `apk-<Laufnummer>`. Update-Prüfung über die GitHub-API (`releases/latest`), Installation per Download im Browser.
 - **Benachrichtigungen:** konfigurierbar in der App (Einstellungen): Erinnerung (Standard Do 18 Uhr, nur wenn ein Ziel offen ist), Wochenrückblick (Standard So 19 Uhr; Mo–Do über die Vorwoche), Erfolge (Bestzeiten, Bestmarken, Jahres-Abzeichen neuer Importe). Hintergrund-Job etwa alle 30 Minuten; Texte rechnet die Web-App (`gas/Meldungen.gs`), damit die Logik nicht in Kotlin doppelt steht.
 - **Schrittzähler** (entschieden 2026-11-18): Hardware-Sensor `TYPE_STEP_COUNTER` des Handys, kein GPS, keine Gesundheits-App. Gelesen etwa alle 30 Minuten im Hintergrund-Job und beim Öffnen der App; Differenz zum letzten Stand wird auf Kalendertage verteilt (über Mitternacht anteilig). Übertragung der letzten 14 Tage höchstens alle 2 Stunden (beim Öffnen alle 10 Minuten). Uhr-Schritte zählen nicht dazu. Schritte sind keine Sportpunkte. Anzeige: Tageswerte in der Wochenansicht, Wochenschnitt (nur abgeschlossene Tage) gegenüber 90 Tagen davor, unter „Form“ 28 Tage gegenüber bis zu 365 Tagen davor, Zeile im Wochenrückblick.
+- **Alltagspunkte** (entschieden 2026-11-18): Handy-Schritte außerhalb aufgezeichneter Garmin-Aktivitäten (Abzug über Messabschnitte des Handys) zählen zum Aktivziel. Formel: max(0, Alltagsschritte − frei) / Schritte pro Punkt, Standard 3000 frei und 200 Schritte pro Punkt; einstellbar in der App (`alltagPunkte`, `alltagFrei`, `alltagProPunkt`). Begründung: Tudor-Locke u. a. 2011 (IJBNPA 8:79): 100 Schritte/min ≈ moderate Intensität, 7000–8000 Schritte/Tag ≈ Empfehlung von 150 Min. pro Woche; mit den Standardwerten ergeben 7000–8000 Schritte 140–175 Punkte pro Woche. Tage über 50 000 Schritte gelten als unrealistisch. „Punkte“ = Sportpunkte + Alltagspunkte (Aktivziel, Serie, Form, Benachrichtigungen).
+- **Karte** (entschieden 2026-11-18): Heatmap aller Spuren (Wandern, Rad, Ski, Laufen zuschaltbar) auf der grauen Landeskarte von swisstopo (umschaltbar: farbig, OpenStreetMap), Ebene „Wanderwege (Schweiz)“ von swisstopo, um unbegangene Wege zu sehen. Leaflet 1.9.4 von cdnjs mit SRI-Prüfsumme, erst beim Öffnen geladen. Spuren im Browser-Cache „sport-daten“. Spur in der Detailansicht.
 - **Keine geschätzten Sportpunkte für unrealistische Aktivitäten** (nur echte Intensitätsminuten), seit Web-App 0.7.0.
 - **App ohne Build-Schritt:** schlichtes HTML/CSS/JavaScript in `/docs`, GitHub Pages veröffentlicht direkt.
 - **Deployment per GitHub Action schon ab v0.1** (statt erst v0.2). Die Skript-ID steht als Repo-Variable `GAS_SCRIPT_ID`, die Action erzeugt daraus `gas/.clasp.json`. clasp-Version fest: `@google/clasp@3.4.1`.
@@ -227,6 +229,23 @@ Laufband-Läufe zählen fürs Laufziel. Indoor-Fahrten zählen zu Rad, haben abe
 - Wochenbeginn: Montag
 - Weitere Einstellungen nach Bedarf
 
+### Sheet „Spuren" (ab v0.9)
+
+| Spalte | Inhalt |
+|---|---|
+| activityId, sportart, start | Aktivität |
+| status | `ok`, `keine` (keine GPS-Punkte), `fehler <HTTP>` |
+| punkte | Anzahl GPS-Punkte in der FIT-Datei |
+| grob | Google-Polyline, Douglas-Peucker 30 m (Heatmap) |
+| fein | Google-Polyline, 5 m (bei sehr langen Spuren größer, max. 45 000 Zeichen) (Detailansicht) |
+| bearbeitet | Zeitpunkt |
+
+Nur Wandern, Rad, Ski, Laufen mit GPS, ohne unrealistische Aktivitäten. Ersetzt den geplanten Drive-Ordner „Sport-Spuren“ (ein Abruf statt tausender Dateien).
+
+### Sheet „Schrittabschnitte" (ab v0.9)
+
+von, bis (ms), schritte: Messabschnitte des Handys der letzten 35 Tage. Daraus werden die Schritte während Garmin-Aktivitäten abgezogen.
+
 ### Sheet „Schritte" (ab v0.8)
 
 | Spalte | Inhalt |
@@ -234,6 +253,7 @@ Laufband-Läufe zählen fürs Laufziel. Indoor-Fahrten zählen zu Rad, haben abe
 | datum | Tag als Text `YYYY-MM-DD` (Europe/Zurich) |
 | schritte | Schritte des Handys an diesem Tag |
 | aktualisiert | Zeitpunkt der letzten Übertragung |
+| alltag | Alltagsschritte: Schritte minus Schritte während Garmin-Aktivitäten (ab v0.9) |
 
 Die Android-App schickt jeweils die letzten 14 Tage; vorhandene Tage werden überschrieben (das Handy ist die Quelle).
 
@@ -258,8 +278,11 @@ Die Android-App schickt jeweils die letzten 14 Tage; vorhandene Tage werden übe
 | `details` | Zusatzwerte einer Aktivität (`id`) aus der Spalte `details`: `{id, details: {…}}`, leeres Objekt, wenn nichts da ist |
 | `meldung` | Text einer Benachrichtigung: `art` = `test`, `erinnerung`, `rueckblick`, `erfolge` (mit `seit` in ms). `{meldung: {titel, text}}` oder `{meldung: null}` (`gas/Meldungen.gs`) |
 | `schritteSetzen` | Schritte pro Tag vom Handy speichern: `daten` = JSON `{"YYYY-MM-DD": Zahl}` (`gas/Schritte.gs`) |
-| `schritte` | alle Tage: `{tage: [["YYYY-MM-DD", Zahl], …]}` |
-| `spuren`, `spur` | ab v0.9 |
+| `schritte` | alle Tage: `{tage: [["YYYY-MM-DD", schritte, alltag, alltagPunkte, unplausibel], …]}` |
+| `spuren` | alle groben Spuren: `{spuren: [[id, sportart, "YYYY-MM-DD", polyline], …], offen}` (`gas/Spuren.gs`) |
+| `spur` | feine Spur einer Aktivität (`id`): `{fein}` |
+
+Ab v0.9 auch **POST** (`doPost`): Token und Aktion in der URL, Daten als JSON im Rumpf (z. B. `schritteSetzen` mit `daten` und `abschnitte`).
 
 Antwort immer JSON: `{ok: true, version, …}` oder `{ok: false, fehler}`. Ohne gültiges Token: `{ok: false, fehler: "nicht berechtigt"}`.
 Die Web-App läuft als Christof („Ausführen als: Ich“) mit Zugriff „Jeder“; geschützt ist sie allein durch das Token.
@@ -278,10 +301,11 @@ Die Web-App läuft als Christof („Ausführen als: Ich“) mit Zugriff „Jeder
 /gas/Sammler.gs                 v0.2: Sammler, Sheet, Zeitgeber, Fehler-Mail
 /gas/WebApp.gs                  v0.3: Schnittstelle für die App (doGet)
 /gas/Meldungen.gs               v0.7: Texte für die Benachrichtigungen
-/gas/Schritte.gs                v0.8: Blatt „Schritte“, Aktionen schritteSetzen und schritte
+/gas/Schritte.gs                v0.8: Blatt „Schritte“, Aktionen schritteSetzen und schritte; v0.9: Alltagsschritte und -punkte
+/gas/Spuren.gs                  v0.9: GPS-Spuren aus FIT, Vereinfachung, Polyline, Nachladen, Aktionen spuren und spur
 /android/                       Android-App (Kotlin): MainActivity (WebView), Bruecke, PruefJob, Pruefung, Melder, Update, Netz, Speicher, Schritte
 /.github/workflows/android.yml  APK bauen, signieren, als Release „apk-<Laufnummer>“ veröffentlichen
-/docs/                          App auf GitHub Pages: index.html, app.js, form.js (Ansicht „Form“), hilfe.js (Erklärungen), style.css, sw.js, manifest.json, icons/
+/docs/                          App auf GitHub Pages: index.html, app.js, form.js (Ansicht „Form“), karte.js (Karte), hilfe.js (Erklärungen), style.css, sw.js, manifest.json, icons/
 /.github/workflows/deploy-gas.yml  Deployment nach Apps Script per clasp
 ```
 
@@ -342,6 +366,13 @@ Für v0.7 (Android-App):
 3. Am Handy https://github.com/obitusde/sport/releases/latest öffnen, APK herunterladen, öffnen, Installation aus dieser Quelle erlauben, installieren.
 4. App öffnen, Benachrichtigungen erlauben. Verbindung ist evtl. neu einzutragen (die App hat einen eigenen Speicher). Unter Einstellungen → Benachrichtigungen „Test“ tippen.
 
+Für v0.9 (Alltagspunkte und Karte):
+
+1. App-Update installieren (Einstellungen → „Nach App-Update suchen“).
+2. Script-Editor: `diagnoseSpuren` (Datei `Spuren.gs`) ausführen, loggt nur Größen.
+3. Script-Editor: `spurenZeitgeberEinrichten` ausführen. Lädt alle 10 Minuten Spuren nach (ca. 250 pro Lauf) und entfernt sich selbst, wenn alles da ist (bei ca. 2700 Aktivitäten ein paar Stunden).
+4. Einstellungen → Alltagspunkte prüfen bzw. anpassen.
+
 Für v0.8 (Schrittzähler):
 
 1. Warten, bis „Android-App bauen“ grün ist; die installierte App meldet das Update (oder Einstellungen → „Nach App-Update suchen“). APK herunterladen und installieren.
@@ -379,7 +410,7 @@ Für v0.5: nichts einzurichten. Optional `webAppTesten` ausführen: loggt, wie v
 | v0.6 | Form: relative Werte gegenüber dem eigenen Schnitt, Sportpunkte pro Woche, Laufökonomie, Jahr bis heute, aktive Stunden pro Jahr; Erklär-Seite; Filter für unrealistische Aktivitäten | Ziel 4, Fitness-Stand |
 | v0.7 | Android-App: Hülle um die PWA, Benachrichtigungen (konfigurierbar), Updates über GitHub-Releases | Benachrichtigungen |
 | v0.8 | Schrittzähler des Handys: Diagnose, Blatt „Schritte“, Anzeige in Woche und Form | Bewegung im Alltag |
-| v0.9 | Karte mit allen Spuren, Filter nach Sportart und Jahr, Spuren der Historie nachladen | Ziel 5 |
+| v0.9 | Alltagspunkte aus Schritten (einstellbar, ohne Schritte während Aktivitäten); Karte mit allen Spuren als Heatmap, Wanderwege-Ebene, Filter nach Sportart und Jahr, Spur in der Detailansicht, Historie nachladen | Ziel 5, Alltag zählt |
 
 ### Ideen für später
 
@@ -404,6 +435,7 @@ Für v0.5: nichts einzurichten. Optional `webAppTesten` ausführen: loggt, wie v
 
 | Version | Datum | Änderung |
 |---|---|---|
+| 0.9.0 | 2026-11-18 | v0.9: Alltagspunkte (`gas/Schritte.gs` 0.9.0 mit Schrittabschnitten und Abzug während Aktivitäten, `gas/WebApp.gs` 0.9.0 mit `doPost`, Einstellungen `alltagPunkte`/`alltagFrei`/`alltagProPunkt`, Aktionen `spuren`/`spur`; `gas/Meldungen.gs` 0.9.0 Punkte inkl. Alltag). Spuren (`gas/Spuren.gs` 0.9.0 neu, `gas/Sammler.gs` 0.9.0 lädt Spuren neuer Aktivitäten). Android 0.9.0 (Messabschnitte, Übertragung per POST). Oberfläche 0.9.0: Karte (`docs/karte.js` neu), Spur in der Detailansicht, Alltagspunkte in Woche/Form/Einstellungen, Erklär-Seite. Entscheidung: Spuren im Sheet statt Drive. Umgebung der Cloud-Sitzung: freier Internetzugang auf Wunsch von Christof |
 | 0.8.0 | 2026-11-18 | v0.8 Schrittzähler: `android/` 0.8.0 (`Schritte.kt` neu, Berechtigung ACTIVITY_RECOGNITION, Lesen im Job und beim Öffnen, Übertragung, Diagnose über die Brücke), `gas/Schritte.gs` 0.8.0 (neu), `gas/WebApp.gs` 0.8.0, `gas/Meldungen.gs` 0.8.0 (Schritte im Rückblick). Oberfläche 0.8.0: Schritte pro Tag in der Tagesleiste, Karte „Schritte“, Vergleich unter „Form“, Einstellungen „Schrittzähler“, Erklär-Seite |
 | 0.7.0 | 2026-11-18 | v0.7 Android-App: `android/` (Kotlin, WebView-Hülle, Brücke `SportApp`, Hintergrund-Job, Benachrichtigungen, Update-Prüfung) 0.7.0, `.github/workflows/android.yml` 0.7.0 (Probe-Build ohne Secrets, sonst signiertes Release). `gas/Meldungen.gs` 0.7.0 (Aktion `meldung`), `gas/WebApp.gs` 0.7.0 (keine Schätzpunkte für unrealistische Aktivitäten). Oberfläche 0.7.0: Benachrichtigungen in den Einstellungen (in der App) bzw. Download-Link (im Browser), Update-Knopf, Erklär-Seite ergänzt |
 | 0.6.0 | 2026-11-17 | v0.6 nach Feedback: unrealistische Aktivitäten werden erkannt und zählen nicht für km/Zeit/Bestmarken; Halbmarathon-Bestzeit entfernt; Jahrestabelle durch Jahres-Abzeichen fürs laufende Jahr ersetzt; neue Ansicht „Form“ (`docs/form.js` 0.6.0) mit Formstand, Vergleich je Kennzahl, Sportpunkte-Diagramm, Laufökonomie, Jahr bis heute, aktive Stunden pro Jahr; Erklär-Seite (`docs/hilfe.js` 0.6.0); Wochenansicht zeigt Anteil am eigenen Schnitt; Zurück führt in die vorherige Ansicht. App 0.6.0 (`app.js`, `style.css`, `sw.js`, `index.html`). Keine Änderung an Apps Script |

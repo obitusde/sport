@@ -1,6 +1,6 @@
 /**
  * Meldungen.gs – Texte für die Benachrichtigungen der Android-App
- * Version: 0.8.0 (2026-11-18)
+ * Version: 0.9.0 (2026-11-18)
  *
  * Aufruf über die Web-App: aktion=meldung&art=<art>
  *   test        feste Test-Meldung (Diagnose der ganzen Kette)
@@ -12,6 +12,8 @@
  * Antwort: {meldung: {titel, text}} oder {meldung: null}.
  * Ab 0.8.0 enthält der Rückblick die Schritte (Ø pro Tag der Woche im Vergleich zum
  * Ø der 90 Tage davor), sobald das Handy Schritte geschickt hat.
+ * Ab 0.9.0 zählen Alltagspunkte (Schritte.gs) zu den Punkten des Aktivziels; die Texte
+ * zeigen „Punkte: 135 von 150 (95 Sport + 40 Alltag)“.
  *
  * Die Regeln entsprechen der App (docs/app.js): Woche Montag bis Sonntag, Serien mit
  * offener laufender Woche, Sportpunkte ab 2023, Grenzen für unrealistische Aktivitäten,
@@ -91,20 +93,43 @@ function meldungSchluessel_(d) {
   return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
 }
 
-/** Läufe und Sportpunkte pro Woche (Schlüssel = Montag). */
+/** Läufe und Punkte (Sport + Alltag) pro Woche (Schlüssel = Montag). */
 function meldungWochen_(liste) {
   const m = {};
+  const woche = function (d) {
+    const k = meldungSchluessel_(meldungMontag_(d));
+    return m[k] || (m[k] = { laeufe: 0, pkt: 0, sport: 0, alltag: 0 });
+  };
   liste.forEach(function (a) {
-    const k = meldungSchluessel_(meldungMontag_(a.datum));
-    const w = m[k] || (m[k] = { laeufe: 0, pkt: 0 });
+    const w = woche(a.datum);
     if (a.sportart === 'laufen') w.laeufe++;
-    if (typeof a.pkt === 'number') w.pkt += a.pkt;
+    if (typeof a.pkt === 'number') {
+      w.pkt += a.pkt;
+      w.sport += a.pkt;
+    }
   });
+  try {
+    schritteLesen_().tage.forEach(function (z) {
+      if (!z[3]) return;
+      const t = z[0].split('-');
+      const w = woche(new Date(+t[0], +t[1] - 1, +t[2]));
+      w.pkt += z[3];
+      w.alltag += z[3];
+    });
+  } catch (e) {
+    // ohne Blatt „Schritte“: nur Sportpunkte
+  }
   return m;
 }
 
 function meldungWoche_(wochen, montag) {
-  return wochen[meldungSchluessel_(montag)] || { laeufe: 0, pkt: 0 };
+  return wochen[meldungSchluessel_(montag)] || { laeufe: 0, pkt: 0, sport: 0, alltag: 0 };
+}
+
+/** „Punkte: 135 von 150 (95 Sport + 40 Alltag) ✓“ */
+function meldungPunkteText_(w, ziel) {
+  return 'Punkte: ' + w.pkt + ' von ' + ziel + (w.alltag ? ' (' + w.sport + ' Sport + ' + w.alltag + ' Alltag)' : '') +
+    (w.pkt >= ziel ? ' ✓' : '');
 }
 
 /** Serie wie in der App: Wochen in Folge, laufende Woche zählt mit, sobald erfüllt. */
@@ -151,7 +176,7 @@ function meldungErinnerung_(liste, einst, heute) {
     if (w.laeufe < einst.wochenzielLaeufe) offen = true;
   }
   if (einst.wochenzielPunkte > 0) {
-    teile.push('Sportpunkte: ' + w.pkt + ' von ' + einst.wochenzielPunkte + (w.pkt >= einst.wochenzielPunkte ? ' ✓' : ''));
+    teile.push(meldungPunkteText_(w, einst.wochenzielPunkte));
     if (w.pkt < einst.wochenzielPunkte) offen = true;
   }
   if (!offen) return null;
@@ -183,7 +208,7 @@ function meldungRueckblick_(liste, einst, jetzt) {
     zeilen.push('Läufe: ' + w.laeufe + ' von ' + einst.wochenzielLaeufe + (w.laeufe >= einst.wochenzielLaeufe ? ' ✓' : ''));
   }
   if (einst.wochenzielPunkte > 0) {
-    zeilen.push('Sportpunkte: ' + w.pkt + ' von ' + einst.wochenzielPunkte + (w.pkt >= einst.wochenzielPunkte ? ' ✓' : ''));
+    zeilen.push(meldungPunkteText_(w, einst.wochenzielPunkte));
   }
   if (einst.wochenzielLaeufe > 0 && liste.length) {
     const t = serieText('Laufziel', meldungSerie_(wochen, function (x) { return x.laeufe >= einst.wochenzielLaeufe; }, liste[0].datum, heute));
@@ -202,7 +227,7 @@ function meldungRueckblick_(liste, einst, jetzt) {
   }
   if (werte.length >= 4) {
     const schnitt = werte.reduce(function (s, x) { return s + x; }, 0) / werte.length;
-    if (schnitt > 0) zeilen.push('Sportpunkte: ' + Math.round(w.pkt / schnitt * 100) + ' % deines Schnitts');
+    if (schnitt > 0) zeilen.push('Punkte: ' + Math.round(w.pkt / schnitt * 100) + ' % deines Schnitts');
   }
   const schritte = meldungSchritte_(montag);
   if (schritte) zeilen.push(schritte);
