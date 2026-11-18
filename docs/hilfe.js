@@ -1,6 +1,6 @@
 /**
  * hilfe.js – Erklär-Seite „So funktioniert die App“
- * Version: 0.10.0 (2026-11-18)
+ * Version: 0.11.0 (2026-11-18)
  *
  * Erreichbar über das „?“ in „Form“ und „Erfolge“ sowie über die Einstellungen.
  * Werte wie Ziele und Grenzen werden aus app.js gelesen, damit der Text stimmt,
@@ -21,6 +21,7 @@ function ansichtHilfe() {
 
     ${abschnitt('Das Wichtigste in Kürze', `
       <p>Deine Uhr schickt alles an Garmin Connect. Jede Nacht um 3 Uhr holt die App neue Aktivitäten ab, tagsüber auf Knopfdruck mit „Von Garmin holen“.</p>
+      <p>Die Einstellungen findest du unten in der Leiste unter <b>„Optionen“</b> (Zahnrad).</p>
       <p>Die App misst dich an <b>zwei Wochenzielen</b> (Montag bis Sonntag) und vor allem an <b>dir selbst</b>: Unter „Form“ siehst du, ob du gerade mehr oder weniger machst als sonst.</p>`)}
 
     ${abschnitt('Sportpunkte', `
@@ -91,13 +92,29 @@ function ansichtHilfe() {
     ${abschnitt('Karte', `
       <p>Die Karte zeigt alle aufgezeichneten Spuren von Wanderungen, Radfahrten, Skitagen und (zuschaltbar) Läufen als <b>Heatmap</b>: Je öfter du eine Strecke gegangen oder gefahren bist, desto dicker die Linie (1×, 2–4×, 5× und öfter). Die App legt dafür ein Raster von etwa 25 m über die Karte und zählt, wie viele verschiedene Aktivitäten durch jedes Feld gehen. Antippen zeigt alle Aktivitäten an dieser Stelle.</p>
       <p><b>Zug und GPS-Sprünge:</b> Teile einer Spur, in denen du für die Sportart unrealistisch schnell warst (über eine Minute gemessen, z. B. Wandern schneller als 15 km/h), schneidet die App heraus. Ebenso Sprünge und Lücken, etwa wenn die Uhr im Zug pausiert war. Dort ist die Linie unterbrochen statt quer über die Landschaft gezogen. In der Detailansicht steht, wie viele Kilometer ausgeblendet sind.</p>
+      <p>Tippst du auf eine Linie, werden alle Routen an dieser Stelle <b>gelb markiert</b>. In der Liste darunter markiert ein Tippen eine einzelne Route; dort stehen auch Distanz, Dauer und Höhenmeter auf (↑) und ab (↓).</p>
+      <p>Weit herausgezoomt werden die Linien breiter und jede Route bekommt einen <b>Punkt</b>, damit du auch kurze Touren findest. Beim Hineinzoomen verschwinden die Punkte.</p>
       <p>Das Symbol mit den vier Ecken öffnet die Karte im <b>Vollbild</b>; die Zurück-Taste schließt es.</p>
       <p>Über das Symbol oben rechts in der Karte blendest du die <b>offiziellen Wanderwege der Schweiz</b> (swisstopo) ein: So siehst du, wo es Wege gibt, auf denen du noch nicht warst. Als Grundkarte gibt es die Landeskarte von swisstopo oder OpenStreetMap.</p>
-      <p>Die Spuren kommen aus den Originaldateien der Uhr. Beim ersten Mal lädt die App die ganze Historie im Hintergrund nach; das kann ein paar Stunden dauern. Unrealistische Aktivitäten (z. B. Autofahrt mit laufender Aufzeichnung) erscheinen nicht.</p>`)}
+      <p>Die Spuren kommen aus den Originaldateien der Uhr (FIT), bei älteren oder importierten Aktivitäten aus GPX- oder TCX-Dateien. Beim ersten Mal lädt die App die ganze Historie im Hintergrund nach; das kann ein paar Stunden dauern. Unrealistische Aktivitäten (z. B. Autofahrt mit laufender Aufzeichnung) erscheinen nicht.</p>`)}
+
+    ${abschnitt('Historie', `
+      <p>Unter „Historie“ findest du alle Aktivitäten seit Beginn. Die Suche durchsucht Name, Ort, Sportart, Jahr und Monat (Umlaute egal, mehrere Wörter möglich, z. B. „Leytron 2025“).</p>
+      <p>Filtern kannst du nach Sportart (mehrere wählbar), Jahr, Länge und Ort (Garmins Ortsname, Orte ab zwei Aktivitäten), sortieren nach Datum, Distanz, Höhenmeter oder Dauer. Oben steht die Summe der Treffer. Tippen öffnet die Details, „Zurück“ führt an dieselbe Stelle der Liste.</p>`)}
 
     ${abschnitt('Mit Garmin abgleichen', `
       <p>Die App übernimmt neue Aktivitäten von Garmin automatisch, spätere Änderungen aber nicht. Hast du bei Garmin eine Aktivität geändert (z. B. Sportart, Name, gekürzt) oder gelöscht, gehe zu Einstellungen → „Mit Garmin abgleichen“.</p>
       <p>Wähle den Zeitraum, in dem die Aktivität <b>stattfand</b>, und tippe auf „Prüfen“. Die App zeigt, was sich unterscheidet, ändert aber noch nichts. Erst mit „Übernehmen“ werden Änderungen ersetzt, gelöschte Aktivitäten entfernt und fehlende ergänzt. Hat sich die Strecke geändert, wird auch die Spur neu geladen. Der Abgleich läuft nie automatisch.</p>`)}
+
+    ${abschnitt('Wartung', `
+      <p>Unter Optionen → „Wartung“ startest du Diagnosen und Einrichtungen von Apps Script direkt aus der App, ohne PC. Das Protokoll erscheint darunter und lässt sich kopieren. Es enthält nur Zählungen, keine Orte.</p>
+      <ul>
+        <li><b>Stand der Spuren:</b> wie viele Spuren geladen, ohne GPS oder fehlerhaft sind, wie viele bereinigt wurden und ob noch nachgeladen wird</li>
+        <li><b>Spur-Filter prüfen:</b> lädt 10 noch offene Spuren zur Probe und zeigt, was passiert (speichert nichts)</li>
+        <li><b>Spuren nachladen:</b> startet den Zeitgeber, der fehlende Spuren alle 10 Minuten nachlädt und sich danach selbst beendet</li>
+        <li><b>Abgleich-Diagnose:</b> vergleicht die letzten 30 Tage mit Garmin (ändert nichts)</li>
+        <li><b>Status Sammler:</b> letzter Import, letzter Fehler, Zeitgeber</li>
+      </ul>`)}
 
     ${abschnitt('Werte in der Detailansicht', `
       <p><b>Pulszonen:</b> wie lange du in welchem Pulsbereich warst, von Zone 1 (Aufwärmen) bis Zone 5 (Maximum).</p>

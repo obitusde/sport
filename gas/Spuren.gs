@@ -1,6 +1,6 @@
 /**
  * Spuren.gs – GPS-Spuren für die Karte (Heatmap) und die Detailansicht
- * Version: 0.10.1 (2026-11-18)
+ * Version: 0.11.0 (2026-11-18)
  *
  * Quelle: Originaldatei der Aktivität (ZIP mit FIT), Garmin-Endpunkt
  * /download-service/files/activity/{id} mit „Accept: *\/*“ (siehe Diagnose 0.1.1).
@@ -34,12 +34,22 @@
  *   was der Filter entfernt). Schutz: Eine vorhandene gute Spur wird nicht mehr durch ein
  *   Ergebnis ohne Spur ersetzt; liefern 5 solche Spuren hintereinander nichts, bricht das
  *   Nachladen ab (dann stimmt beim Abruf vermutlich etwas nicht).
+ * Änderungen 0.11.0: Ältere Aktivitäten haben statt FIT oft eine GPX- oder TCX-Datei im ZIP
+ *   (Diagnose 0.10.1: „1 Datei im ZIP, keine FIT-Datei“). xmlPunkte_ liest Punkte und Zeit aus
+ *   GPX (trkpt) und TCX (Trackpoint). SPUR_VERSION 3: Nur Einträge ohne Spur (keine, fehler)
+ *   werden noch einmal versucht; vorhandene gute Spuren (Version 2) bleiben, damit nicht
+ *   wieder die ganze Historie von Garmin geladen wird. spurenStand() loggt eine Übersicht
+ *   (für die Wartung in der App).
  */
 
 const BLATT_SPUREN = 'Spuren';
 const SPUREN_SPALTEN = ['activityId', 'sportart', 'start', 'status', 'punkte', 'grob', 'fein', 'bearbeitet', 'version', 'entfernt_km'];
-/** Version der Spur-Berechnung. Ältere Einträge werden neu berechnet. */
-const SPUR_VERSION = 2;
+/**
+ * Version der Spur-Berechnung. Ältere Einträge werden neu berechnet, außer gute Spuren ab
+ * SPUR_VERSION_OK (der Filter hat sich seitdem nicht geändert).
+ */
+const SPUR_VERSION = 3;
+const SPUR_VERSION_OK = 2;
 /**
  * Filter je Sportart: kmh = höchstes Tempo über 60 Sekunden (null = kein Tempofilter, Ski
  * hat Lifte und schnelle Abfahrten), luecke = größter Abstand zweier Punkte in Metern,
@@ -103,6 +113,30 @@ function diagnoseSpurFilter(anzahl) {
     Utilities.sleep(150);
   });
   log_('Geprüft: ' + kandidaten.length + ', davon mit Schnitt: ' + mitSchnitt + ', ohne Zeitstempel: ' + ohneZeit);
+}
+
+/** Übersicht: Anzahl Spuren je Status, offene, bereinigte, Zeitgeber. Nur Zählungen. */
+function spurenStand() {
+  const b = tabelle_().getSheetByName(BLATT_SPUREN);
+  const zaehler = {};
+  let bereinigt = 0;
+  let entferntKm = 0;
+  if (b && b.getLastRow() >= 2) {
+    const breite = Math.min(b.getLastColumn(), SPUREN_SPALTEN.length);
+    b.getRange(2, 1, b.getLastRow() - 1, breite).getValues().forEach(function (z) {
+      const status = String(z[3]).indexOf('fehler') === 0 ? 'fehler' : String(z[3]);
+      zaehler[status] = (zaehler[status] || 0) + 1;
+      if (Number(z[9]) >= 0.1) {
+        bereinigt++;
+        entferntKm += Number(z[9]);
+      }
+    });
+  }
+  log_('Spuren: ' + Object.keys(zaehler).map(function (k) { return k + ' ' + zaehler[k]; }).join(', '));
+  log_('Mit Filter bereinigt: ' + bereinigt + ' Spuren, zusammen ' + runden_(entferntKm, 1) + ' km ausgeblendet');
+  log_('Noch zu laden oder neu zu berechnen: ' + spurKandidaten_().length);
+  const zeitgeber = ScriptApp.getProjectTriggers().filter(function (t) { return t.getHandlerFunction() === 'spurenNachladenAutomatisch'; });
+  log_('Zeitgeber zum Nachladen: ' + (zeitgeber.length ? 'aktiv' : 'aus'));
 }
 
 /** Lädt fehlende Spuren, solange Zeit bleibt. Liefert {verarbeitet, offen}. */
@@ -251,7 +285,8 @@ function spurKandidaten_() {
   if (b && b.getLastRow() >= 2) {
     const breite = Math.min(b.getLastColumn(), SPUREN_SPALTEN.length);
     b.getRange(2, 1, b.getLastRow() - 1, breite).getValues().forEach(function (z, n) {
-      vorhanden[String(z[0])] = { zeile: n + 2, aktuell: Number(z[8]) === SPUR_VERSION };
+      const version = Number(z[8]) || 0;
+      vorhanden[String(z[0])] = { zeile: n + 2, aktuell: version >= SPUR_VERSION || (z[3] === 'ok' && version >= SPUR_VERSION_OK) };
     });
   }
   const i = {};
@@ -309,6 +344,21 @@ function spurLaden_(id, sportart) {
     }
   });
   grund.push(fitGefunden ? 'FIT gefunden' : 'keine FIT-Datei');
+  if (!fitGefunden) {
+    // Ältere Aktivitäten: GPX oder TCX (Text/XML)
+    dateien.forEach(function (d) {
+      if (punkte.length) return;
+      try {
+        const name = String(d.getName() || '');
+        const endung = name.indexOf('.') >= 0 ? name.split('.').pop().toLowerCase() : '?';
+        const x = xmlPunkte_(d.getDataAsString('UTF-8'));
+        grund.push('Datei .' + endung + (x.format ? ' (' + x.format + ', ' + x.punkte.length + ' Punkte)' : ' (kein GPX/TCX)'));
+        punkte = x.punkte;
+      } catch (e) {
+        grund.push('Lesefehler: ' + e.message);
+      }
+    });
+  }
   if (punkte.length < 2) {
     const r = leer('keine', punkte.length);
     r.grund = grund.join(', ');
@@ -429,6 +479,51 @@ function spurFiltern_(punkte, sportart) {
     }
   });
   return { teile: teile, entferntM: Math.max(0, gesamtM - behaltenM), schnellM: schnellM, spruenge: spruenge, mitZeit: mitZeit };
+}
+
+/**
+ * Liest GPS-Punkte [lat, lon, sekunden|null] aus GPX (trkpt mit lat/lon und time) oder
+ * TCX (Trackpoint mit Position/LatitudeDegrees, LongitudeDegrees und Time). Einfache
+ * Textsuche statt XML-Parser: schneller und unempfindlich gegen Namensräume.
+ * @return {{format: (string|null), punkte: Array}}
+ */
+function xmlPunkte_(text) {
+  const punkte = [];
+  const zeit = function (t) {
+    const ms = t ? Date.parse(String(t).trim()) : NaN;
+    return isNaN(ms) ? null : Math.round(ms / 1000);
+  };
+  const zahl = function (t) {
+    const z = parseFloat(t);
+    return isFinite(z) ? z : null;
+  };
+  if (/<(?:\w+:)?gpx[\s>]/i.test(text)) {
+    const re = /<(?:\w+:)?trkpt\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:\w+:)?trkpt>)/gi;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const lat = /\blat\s*=\s*["']([^"']+)["']/i.exec(m[1]);
+      const lon = /\blon\s*=\s*["']([^"']+)["']/i.exec(m[1]);
+      const t = m[2] ? /<(?:\w+:)?time>([^<]+)</i.exec(m[2]) : null;
+      const la = lat ? zahl(lat[1]) : null;
+      const lo = lon ? zahl(lon[1]) : null;
+      if (la !== null && lo !== null && (la !== 0 || lo !== 0)) punkte.push([la, lo, t ? zeit(t[1]) : null]);
+    }
+    return { format: 'GPX', punkte: punkte };
+  }
+  if (/<(?:\w+:)?TrainingCenterDatabase[\s>]/i.test(text)) {
+    const re = /<(?:\w+:)?Trackpoint>([\s\S]*?)<\/(?:\w+:)?Trackpoint>/gi;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const lat = /<(?:\w+:)?LatitudeDegrees>([^<]+)</i.exec(m[1]);
+      const lon = /<(?:\w+:)?LongitudeDegrees>([^<]+)</i.exec(m[1]);
+      const t = /<(?:\w+:)?Time>([^<]+)</i.exec(m[1]);
+      const la = lat ? zahl(lat[1]) : null;
+      const lo = lon ? zahl(lon[1]) : null;
+      if (la !== null && lo !== null && (la !== 0 || lo !== 0)) punkte.push([la, lo, t ? zeit(t[1]) : null]);
+    }
+    return { format: 'TCX', punkte: punkte };
+  }
+  return { format: null, punkte: punkte };
 }
 
 /**

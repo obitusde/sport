@@ -1,4 +1,4 @@
-/* style.css – Sport-App, Version 0.10.0 (2026-11-18) */
+/* style.css – Sport-App, Version 0.11.0 (2026-11-18) */
 
 :root {
   --hintergrund: #f6f5f2;
@@ -338,6 +338,8 @@ body.vollbild-aktiv { overflow: hidden; }
 .popup-liste { list-style: none; margin: 6px 0 0; padding: 0; max-height: 260px; overflow-y: auto; }
 .popup-liste li { padding: 6px 0; border-top: 1px solid #e5e5e5; }
 .popup-liste li:first-child { border-top: 0; }
+.popup-eintrag { cursor: pointer; border-radius: 6px; padding-left: 6px !important; padding-right: 6px !important; }
+.popup-eintrag.gewaehlt { background: #fff4cc; }
 .popup-liste .popup-knopf { display: block; margin-top: 4px; }
 /* Popups sind immer hell (Leaflet), auch im dunklen Modus lesbar halten */
 .leaflet-popup-content .leise { color: #5c5f66; }
@@ -479,6 +481,23 @@ body.vollbild-aktiv { overflow: hidden; }
 .abgleich-art { display: block; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-2); }
 .abgleich-geloescht .abgleich-art { color: var(--fehler); }
 .abgleich-neu .abgleich-art { color: var(--gut); }
+/* Wartung */
+.wartung-kopf { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 14px 0 6px; }
+.wartung-protokoll {
+  margin: 0; padding: 10px; border-radius: 10px; background: var(--flaeche-2);
+  font-size: 0.75rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50vh; overflow-y: auto;
+  user-select: text; -webkit-user-select: text;
+}
+/* Historie */
+.historie-suche {
+  width: 100%; font: inherit; padding: 10px 14px; border-radius: 12px;
+  border: 1px solid var(--linie); background: var(--flaeche); color: var(--text); margin-top: 4px;
+}
+.historie-filter { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 10px; }
+.historie-filter select { font: inherit; font-size: 0.9rem; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--linie); background: var(--flaeche); color: var(--text); min-width: 0; width: 100%; }
+.historie-summe { margin: 12px 0 10px; }
+.eintrag-ort { font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#historie-ergebnis .knopf.voll { margin-top: 6px; }
 
 .tabelle { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 .tabelle td { padding: 6px 0; border-bottom: 1px solid var(--linie); vertical-align: top; }
@@ -500,7 +519,7 @@ body.vollbild-aktiv { overflow: hidden; }
   border-top: 1px solid var(--linie);
 }
 .leiste-knopf {
-  flex: 1; max-width: 200px;
+  flex: 1; max-width: 200px; min-width: 0;
   background: none; border: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
   font-size: 0.75rem; color: var(--text-2);

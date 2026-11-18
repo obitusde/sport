@@ -1,6 +1,6 @@
 /**
  * karte.js – Ansicht „Karte“ (Heatmap aller Spuren) und Spur in der Detailansicht
- * Version: 0.10.0 (2026-11-18)
+ * Version: 0.11.0 (2026-11-18)
  *
  * - Grundkarte: graue Landeskarte von swisstopo (WMTS, Web-Mercator), etwas blasser, damit
  *   die Spuren vorne stehen; umschaltbar auf die farbige Landeskarte oder OpenStreetMap.
@@ -18,6 +18,9 @@
  *   dieser Stelle.
  * - Detailansicht: feine Spur (5 m) einer Aktivität (Aktion „spur“) mit Start und Ziel.
  * - Vollbild für beide Karten (Zurück-Taste schließt es).
+ * - Ab 0.11.0: Angetippte Spuren werden gelb markiert (in der Liste des Popups lässt sich eine
+ *   einzelne wählen); das Popup zeigt Höhenmeter auf und ab. Weit herausgezoomt werden die
+ *   Linien breiter und jede Spur bekommt einen Punkt, damit man sieht, wo man war.
  * - Die Spuren werden beim Öffnen der Karte neu geladen (zuerst aus dem Cache gezeigt).
  * Leaflet 1.9.4 wird erst beim ersten Öffnen einer Karte von cdnjs geladen (mit SRI-Prüfsumme).
  * Nutzt Funktionen und Konstanten aus app.js (wird vor app.js geladen, aber erst später aufgerufen).
@@ -44,6 +47,14 @@ const HEAT_SCHRITT = 20;    // Abstand der Stichproben entlang der Linie
 const HEAT_STUECK = 150;    // längere Abschnitte werden für die Einfärbung unterteilt
 const DATEN_CACHE = 'sport-daten';
 const RETINA = (window.devicePixelRatio || 1) >= 1.5;
+const MARKIERUNG_FARBE = '#ffc400';
+/** Ab dieser Zoomstufe und kleiner bekommt jede Spur einen Punkt. */
+const PUNKTE_BIS_ZOOM = 11;
+
+/** Linien werden beim Herauszoomen breiter, damit sie sichtbar bleiben. */
+function breitenFaktor(zoom) {
+  return zoom <= 7 ? 2.4 : zoom <= 8 ? 2.1 : zoom <= 9 ? 1.8 : zoom <= 10 ? 1.55 : zoom <= 11 ? 1.3 : zoom <= 12 ? 1.15 : 1;
+}
 
 const karteZustand = {
   filter: { wandern: true, rad: true, ski: true, laufen: false },
@@ -60,7 +71,11 @@ const karteZustand = {
   detailKarte: null,
   vollbild: null,     // null, 'karte' oder 'detail'
   feineSpuren: new Map(),
-  heat: null          // {schluessel, linien, spuren}
+  heat: null,         // {schluessel, linien, spuren}
+  ebenen: [],         // [{ebene, breite}] Linien der Heatmap, Breite wird je Zoom angepasst
+  punkte: null,       // Ebene mit einem Punkt je Spur (weit herausgezoomt)
+  markierung: null,   // Ebene mit den gelb markierten Spuren
+  markierungPopup: null
 };
 
 let leafletVersprechen = null;
@@ -452,15 +467,52 @@ async function karteNachZeichnen() {
     if (karteZustand.karte !== karte) return;
     const zeichner = L.canvas({ padding: 0.5 });
     const linien = heatHolen(liste);
+    const faktor = breitenFaktor(karte.getZoom());
+    karteZustand.ebenen = [];
     [1, 2, 3].forEach(st => {
       const alle = [].concat(...Object.values(linien[st]));
       if (!alle.length) return;
-      L.polyline(alle, { renderer: zeichner, color: '#fff', weight: LINIEN_BREITE[st] + 3, opacity: 0.95, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(karte);
+      const rand = L.polyline(alle, { renderer: zeichner, color: '#fff', weight: (LINIEN_BREITE[st] + 3) * faktor, opacity: 0.95, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(karte);
+      karteZustand.ebenen.push({ ebene: rand, breite: LINIEN_BREITE[st] + 3 });
       Object.keys(linien[st]).forEach(sa => {
-        L.polyline(linien[st][sa], { renderer: zeichner, color: LINIEN_FARBE[sa] || '#555', weight: LINIEN_BREITE[st], opacity: 1, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(karte);
+        const linie = L.polyline(linien[st][sa], { renderer: zeichner, color: LINIEN_FARBE[sa] || '#555', weight: LINIEN_BREITE[st] * faktor, opacity: 1, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(karte);
+        karteZustand.ebenen.push({ ebene: linie, breite: LINIEN_BREITE[st] });
       });
     });
+    // Ein Punkt je Spur (Mitte der Strecke), nur weit herausgezoomt
+    karteZustand.punkte = L.layerGroup(liste.filter(sp => sp.teile.length).map(sp => {
+      const teil = sp.teile.reduce((a, b) => (b.length > a.length ? b : a));
+      return L.circleMarker(teil[Math.floor(teil.length / 2)], {
+        renderer: zeichner, radius: 4.5, color: '#fff', weight: 1.5, fillColor: LINIEN_FARBE[sp.sportart] || '#555', fillOpacity: 1, interactive: false
+      });
+    }));
+    const zoomAnpassen = () => {
+      const f = breitenFaktor(karte.getZoom());
+      karteZustand.ebenen.forEach(x => x.ebene.setStyle({ weight: x.breite * f }));
+      const zeigen = karte.getZoom() <= PUNKTE_BIS_ZOOM;
+      if (zeigen && !karte.hasLayer(karteZustand.punkte)) karteZustand.punkte.addTo(karte);
+      if (!zeigen && karte.hasLayer(karteZustand.punkte)) karte.removeLayer(karteZustand.punkte);
+      if (karteZustand.markierung) karteZustand.markierung.eachLayer(l => l.bringToFront());
+    };
+    zoomAnpassen();
+    karte.on('zoomend', zoomAnpassen);
   }, 30);
+}
+
+/** Markiert Spuren gelb (über allen anderen Linien); leere Liste entfernt die Markierung. */
+function spurenMarkieren(karte, spuren) {
+  if (karteZustand.markierung) {
+    karte.removeLayer(karteZustand.markierung);
+    karteZustand.markierung = null;
+  }
+  if (!spuren.length) return;
+  const f = breitenFaktor(karte.getZoom());
+  const ebenen = [];
+  spuren.forEach(sp => {
+    ebenen.push(L.polyline(sp.teile, { color: '#2b2100', weight: 9 * f, opacity: 0.75, interactive: false, lineCap: 'round', lineJoin: 'round' }));
+    ebenen.push(L.polyline(sp.teile, { color: MARKIERUNG_FARBE, weight: 5 * f, opacity: 1, interactive: false, lineCap: 'round', lineJoin: 'round' }));
+  });
+  karteZustand.markierung = L.layerGroup(ebenen).addTo(karte);
 }
 
 /** Zeigt alle Aktivitäten, deren Spur nahe am angetippten Punkt liegt. */
@@ -486,21 +538,45 @@ function karteAngetippt(karte, liste, e) {
     });
     if (nah) treffer.push(s);
   });
-  if (!treffer.length) return;
+  if (!treffer.length) {
+    spurenMarkieren(karte, []);
+    return;
+  }
   treffer.sort((a, b) => (a.datum < b.datum ? 1 : -1));
   const proId = new Map(zustand.aktivitaeten.map(a => [a.id, a]));
-  const max = 8;
+  const max = 20;
   const zeilen = treffer.slice(0, max).map(s => {
-    const a = proId.get(s.id);
-    return `<li><b>${esc(a ? (a.name || SPORT_NAME[a.sportart]) : SPORT_NAME[s.sportart])}</b><br>
-      <span class="leise">${esc(datumLang(lokalesDatum(s.datum)))}${a && a.km ? ' · ' + km(a.km) : ''}</span>
+    const a = proId.get(s.id) || {};
+    const hoehe = a.hm || a.hmAb ? `<br><span class="leise">↑ ${zahlFormat0.format(a.hm || 0)} m${typeof a.hmAb === 'number' ? ' · ↓ ' + zahlFormat0.format(a.hmAb) + ' m' : ''}</span>` : '';
+    return `<li class="popup-eintrag" data-id="${esc(s.id)}"><b>${esc(a.name || SPORT_NAME[s.sportart])}</b><br>
+      <span class="leise">${esc(datumLang(lokalesDatum(s.datum)))}${a.km ? ' · ' + km(a.km) : ''}${a.min ? ' · ' + dauer(a.min) : ''}</span>${hoehe}
       <button type="button" class="knopf klein popup-knopf" data-id="${esc(s.id)}">Details</button></li>`;
   }).join('');
-  L.popup({ maxWidth: 280 })
+  const popup = L.popup({ maxWidth: 290 })
     .setLatLng(e.latlng)
-    .setContent(`${treffer.length > 1 ? `<b>Hier warst du ${treffer.length}×</b>` : ''}<ul class="popup-liste">${zeilen}</ul>` +
+    .setContent(`${treffer.length > 1 ? `<b>Hier warst du ${treffer.length}×</b><br><span class="leise klein-text">Antippen markiert eine einzelne Route.</span>` : ''}<ul class="popup-liste">${zeilen}</ul>` +
       (treffer.length > max ? `<span class="leise">und ${treffer.length - max} weitere</span>` : ''))
     .openOn(karte);
+  // Erst nach openOn markieren: Das Schließen des alten Popups entfernt sonst die neue Markierung
+  karteZustand.markierungPopup = popup;
+  spurenMarkieren(karte, treffer);
+  const element = popup.getElement();
+  if (element) {
+    element.querySelectorAll('.popup-eintrag').forEach(li => {
+      li.addEventListener('click', ev => {
+        if (ev.target.closest('.popup-knopf')) return;
+        const sp = treffer.find(x => x.id === li.dataset.id);
+        if (!sp) return;
+        element.querySelectorAll('.popup-eintrag').forEach(x => x.classList.toggle('gewaehlt', x === li));
+        spurenMarkieren(karte, [sp]);
+      });
+    });
+  }
+  popup.on('remove', () => {
+    if (karteZustand.markierungPopup !== popup) return;
+    karteZustand.markierungPopup = null;
+    spurenMarkieren(karte, []);
+  });
 }
 
 // ---------------------------------------------------------------------------

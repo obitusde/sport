@@ -1,6 +1,6 @@
 /**
  * app.js – Sport-App
- * Version: 0.10.0 (2026-11-18)
+ * Version: 0.11.0 (2026-11-18)
  *
  * Ansichten: Woche, Einstellungen.
  * Die App holt die Aktivitäten als Liste von der Apps-Script-Web-App und rechnet
@@ -40,10 +40,14 @@
  * Höhenmeter ohne Pistenski (Lift). Einstellungen neu gesetzt (Zähler mit fester Breite).
  * Abgleich mit Garmin für einen Zeitraum (Prüfen, dann Übernehmen). Karte in der
  * Detailansicht größer und oben, Vollbild; die Karte lädt beim Öffnen neu.
+ * Änderungen 0.11.0: Neuer Reiter „Historie“ (historie.js), der Reiter „Einstellungen“ heißt
+ * in der Leiste „Optionen“ (Platz für sechs Reiter). Bereich „Wartung“ in den Einstellungen:
+ * Diagnosen und Nachladen per Knopf, das Protokoll erscheint in der App (kein PC nötig).
+ * Zurück aus der Detailansicht stellt die Scroll-Position wieder her.
  */
 'use strict';
 
-const APP_VERSION = '0.10.0';
+const APP_VERSION = '0.11.0';
 
 const SPEICHER = {
   url: 'sport.url',
@@ -100,7 +104,9 @@ const zustand = {
   detailId: null,
   detailLaedt: false,
   detailFehler: null,
-  abgleich: { von: null, bis: null, laedt: false, ergebnis: null, fehler: null }
+  abgleich: { von: null, bis: null, laedt: false, ergebnis: null, fehler: null },
+  wartung: { laedt: null, ergebnis: null, fehler: null },
+  scrollMerker: {}
 };
 
 // ---------------------------------------------------------------------------
@@ -855,7 +861,8 @@ function esc(text) {
 
 /** Abgerundet auf 0,1 km: 4,96 km wird „4,9 km“, damit „5,0 km“ nur bei vollen 5 km erscheint. */
 function km(wert) {
-  return kmFormat.format(Math.floor(wert * 10 + 1e-6) / 10) + ' km';
+  // Tausender mit Apostroph wie bei den übrigen Zahlen: „2'016,0 km“
+  return kmFormat.format(Math.floor(wert * 10 + 1e-6) / 10).replace(/\./g, "'") + ' km';
 }
 
 function dauer(min) {
@@ -1359,6 +1366,63 @@ async function abgleichStarten(uebernehmen) {
   if (uebernehmen && !ab.fehler) allesLaden();
 }
 
+// ---------------------------------------------------------------------------
+// Wartung (Einstellungen): Diagnosen per Knopf, Protokoll in der App
+// ---------------------------------------------------------------------------
+
+const WARTUNG_KNOEPFE = [
+  { art: 'spurenStand', text: 'Stand der Spuren' },
+  { art: 'spurFilter', text: 'Spur-Filter prüfen' },
+  { art: 'spurenNeu', text: 'Spuren nachladen' },
+  { art: 'abgleich', text: 'Abgleich-Diagnose' },
+  { art: 'status', text: 'Status Sammler' }
+];
+
+function wartungHtml() {
+  const v = verbindung();
+  const w = zustand.wartung;
+  const e = w.ergebnis;
+  return `<h2>Wartung</h2>
+  <section class="karte">
+    <p class="leise klein-text" style="margin-top:0">Startet Diagnosen und Einrichtungen in Apps Script, ohne PC. Die Protokolle enthalten nur Zählungen, keine Orte. „Spur-Filter prüfen“ lädt 10 Dateien von Garmin und dauert etwa eine halbe Minute.</p>
+    <div class="knopfreihe">
+      ${WARTUNG_KNOEPFE.map(k => `<button class="knopf" data-aktion="wartung" data-art="${k.art}" ${w.laedt || !v.token ? 'disabled' : ''}>${w.laedt === k.art ? 'Läuft …' : k.text}</button>`).join('')}
+    </div>
+    ${w.fehler ? `<p class="hinweis-fehler">${esc(w.fehler)}</p>` : ''}
+    ${e ? `<div class="wartung-kopf"><b>${esc(e.titel)}</b><button class="knopf klein" data-aktion="wartung-kopieren">Kopieren</button></div>
+      <pre class="wartung-protokoll">${esc(e.protokoll.join('\n') || '(keine Ausgabe)')}</pre>` : ''}
+  </section>`;
+}
+
+async function wartungStarten(art) {
+  const w = zustand.wartung;
+  if (w.laedt) return;
+  w.laedt = art;
+  w.fehler = null;
+  zeichnen();
+  try {
+    const antwort = await api('wartung', { art: art });
+    w.ergebnis = { titel: antwort.titel, protokoll: antwort.protokoll || [] };
+  } catch (e) {
+    w.fehler = e.message.indexOf('unbekannte aktion') >= 0 ? 'Die Web-App ist noch nicht aktualisiert (Version 0.11 nötig).' : e.message;
+  } finally {
+    w.laedt = null;
+    zeichnen();
+  }
+}
+
+async function wartungKopieren() {
+  const e = zustand.wartung.ergebnis;
+  if (!e) return;
+  const text = e.titel + '\n' + e.protokoll.join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    meldung('Protokoll kopiert.');
+  } catch (err) {
+    meldung('Kopieren ging nicht. Text lange antippen und markieren.');
+  }
+}
+
 function ansichtEinstellungen() {
   const v = verbindung();
   const st = zustand.status;
@@ -1403,6 +1467,8 @@ function ansichtEinstellungen() {
   </section>
 
   ${abgleichHtml()}
+
+  ${wartungHtml()}
 
   <h2>Daten</h2>
   <section class="karte">
@@ -1476,7 +1542,10 @@ function gespeicherteDetails() {
 
 /** Merkt sich die aktuelle Ansicht, damit „Zurück“ dorthin führt. */
 function unterseiteOeffnen(ansicht, zustandFuerHistory) {
-  if (zustand.ansicht !== 'detail' && zustand.ansicht !== 'hilfe') zustand.vorherigeAnsicht = zustand.ansicht;
+  if (zustand.ansicht !== 'detail' && zustand.ansicht !== 'hilfe') {
+    zustand.vorherigeAnsicht = zustand.ansicht;
+    zustand.scrollMerker[zustand.ansicht] = window.scrollY;
+  }
   zustand.ansicht = ansicht;
   history.pushState(zustandFuerHistory, '');
   window.scrollTo(0, 0);
@@ -1627,7 +1696,7 @@ function zeichnen() {
   const inhalt = document.getElementById('inhalt');
   const ansichten = {
     einstellungen: ansichtEinstellungen, erfolge: ansichtErfolge, form: ansichtForm, karte: ansichtKarte,
-    detail: ansichtDetail, hilfe: ansichtHilfe, woche: ansichtWoche
+    detail: ansichtDetail, hilfe: ansichtHilfe, woche: ansichtWoche, historie: ansichtHistorie
   };
   inhalt.innerHTML = (ansichten[zustand.ansicht] || ansichtWoche)();
   if (zustand.ansicht === 'karte') karteNachZeichnen();
@@ -1722,6 +1791,8 @@ document.addEventListener('click', ereignis => {
       break;
     case 'von-garmin': vonGarminHolen(); break;
     case 'abgleich-pruefen': abgleichStarten(false); break;
+    case 'wartung': wartungStarten(ziel.dataset.art); break;
+    case 'wartung-kopieren': wartungKopieren(); break;
     case 'abgleich-uebernehmen':
       if (confirm('Änderungen von Garmin übernehmen? Gelöschte Aktivitäten werden auch in der App gelöscht.')) abgleichStarten(true);
       break;
@@ -1782,6 +1853,7 @@ window.addEventListener('popstate', () => {
     zustand.ansicht = zustand.vorherigeAnsicht || 'woche';
     zustand.detailId = null;
     zeichnen();
+    window.scrollTo(0, zustand.scrollMerker[zustand.ansicht] || 0);
   }
 });
 

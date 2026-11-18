@@ -1,6 +1,6 @@
 # PROJEKT.md – Sport-Tracker (Arbeitstitel „sport")
 
-Version: 0.10.1 (2026-11-18) – v0.10 Karte überarbeitet, Abgleich mit Garmin, persönliche Jahres-Abzeichen
+Version: 0.11.0 (2026-11-18) – v0.11 Historie, Markierung auf der Karte, Wartung per Knopf, GPX/TCX
 
 Dieses Dokument ist die Grundlage für die Entwicklung mit Claude Code. Es beschreibt Ziele, Architektur, Arbeitsweise und Fahrplan. Claude Code liest es vor jeder Arbeit und hält es aktuell.
 
@@ -142,6 +142,7 @@ Epix / Tacho → Garmin Connect (unverändert)
 - **Spur-Filter** (entschieden 2026-11-18): Zugfahrten und GPS-Sprünge werden aus den Spuren herausgeschnitten und nicht angezeigt. Tempo über 60 Sekunden (Luftlinie) über der Grenze der Sportart (Wandern 15, Laufen 30, Rad 80 km/h, Ski ohne Tempogrenze), Abstand zweier Punkte über 400 m (Rad 1000, Ski 1500 m) oder ein Sprung über 50 m mit unrealistischem Tempo unterbricht die Linie; Reste unter 150 m fallen weg. Zeitstempel aus den FIT-Records (Feld 253). Mehrere Teile durch Leerzeichen getrennt. Kilometer der Aktivität bleiben unverändert (Garmin-Wert).
 - **Abgleich mit Garmin** (entschieden 2026-11-18): nur auf Knopfdruck, nicht automatisch. Zeitraum = Datum der Aktivität. Erst „Prüfen“ (zeigt geändert / gelöscht / fehlt), dann „Übernehmen“. Spur wird bei geänderter Strecke neu geladen.
 - **Jahres-Abzeichen persönlich** (entschieden 2026-11-18): Bronze = 50 % des Schnitts der letzten 3 Jahre, Silber = Schnitt, Gold = bestes dieser Jahre (mind. 15 % über Schnitt), Rekord = bestes Jahr überhaupt (nur wenn höher als Gold); auf schöne Zahlen gerundet. Ski in Skitagen. Ohne Vorjahr feste Einstiegswerte. Hochrechnung bis Jahresende mit der Saison der Vorjahre. Gleiche Regeln in `docs/app.js` und `gas/Meldungen.gs`.
+- **v0.11** (entschieden 2026-11-18): Angetippte Spuren gelb markieren (einzelne in der Popup-Liste wählbar), Popup mit Höhenmetern auf/ab. Weit herausgezoomt breitere Linien (Faktor bis 2,4) und ein Punkt je Spur bis Zoom 11. Neuer Reiter „Historie“ (Suche, Filter Sportart/Jahr/Länge/Ort, Sortierung); der Reiter „Einstellungen“ heißt in der Leiste „Optionen“ (Platz für sechs Reiter). Wartung per Knopf in der App statt Script-Editor (Aktion `wartung`, feste Auswahl, Protokoll in der App). GPX/TCX aus dem ZIP lesen, wenn keine FIT-Datei drin ist (ältere/importierte Aktivitäten); nur Spuren ohne Ergebnis werden dafür erneut geladen, nicht die ganze Historie.
 - **Bestmarke Höhenmeter ohne Pistenski** (Garmin zählt die Liftfahrten mit), Skitouren zählen.
 - **Keine geschätzten Sportpunkte für unrealistische Aktivitäten** (nur echte Intensitätsminuten), seit Web-App 0.7.0.
 - **App ohne Build-Schritt:** schlichtes HTML/CSS/JavaScript in `/docs`, GitHub Pages veröffentlicht direkt.
@@ -244,7 +245,7 @@ Laufband-Läufe zählen fürs Laufziel. Indoor-Fahrten zählen zu Rad, haben abe
 | grob | Google-Polyline, Douglas-Peucker 30 m (Heatmap) |
 | fein | Google-Polyline, 5 m (bei sehr langen Spuren größer, max. 45 000 Zeichen) (Detailansicht) |
 | bearbeitet | Zeitpunkt |
-| version | Version der Berechnung (ab v0.10: 2). Ältere werden vom Zeitgeber neu berechnet |
+| version | Version der Berechnung (v0.10: 2, ab v0.11: 3). Ältere werden vom Zeitgeber neu berechnet, außer gute Spuren ab Version 2 |
 | entfernt_km | vom Spur-Filter entfernte Kilometer (Zug, GPS-Sprünge) |
 
 Mehrteilige Spuren (nach dem Filter): Polylines durch ein Leerzeichen getrennt. Nur Wandern, Rad, Ski, Laufen mit GPS, ohne unrealistische Aktivitäten. Ersetzt den geplanten Drive-Ordner „Sport-Spuren“ (ein Abruf statt tausender Dateien).
@@ -277,7 +278,7 @@ Die Android-App schickt jeweils die letzten 14 Tage; vorhandene Tage werden übe
 
 | aktion | Liefert |
 |---|---|
-| `aktivitaeten` | alle Aktivitäten kompakt: `spalten` = `id, start, sportart, typ, name, km, min, minGesamt, hm, puls, gps, pkt, pktGeschaetzt, s1k, s5k, s10k, s21k`, `zeilen` = Liste von Listen. `start` als lokale Zeit `YYYY-MM-DDTHH:mm`. `pkt` = Sportpunkte (null vor 2023), `s…` = schnellste Abschnitte in Sekunden. Dazu `punkteAbJahr` und `punkteFaktoren` (Punkte pro Bewegungsminute je Sportart) |
+| `aktivitaeten` | alle Aktivitäten kompakt: `spalten` = `id, start, sportart, typ, name, km, min, minGesamt, hm, puls, gps, pkt, pktGeschaetzt, s1k, s5k, s10k, s21k, hmAb, ort` (ab v0.11 mit `hmAb` und `ort` aus `details`), `zeilen` = Liste von Listen. `start` als lokale Zeit `YYYY-MM-DDTHH:mm`. `pkt` = Sportpunkte (null vor 2023), `s…` = schnellste Abschnitte in Sekunden. Dazu `punkteAbJahr` und `punkteFaktoren` (Punkte pro Bewegungsminute je Sportart) |
 | `einstellungen` | `einstellungen` aus dem Blatt „Konfiguration“, fehlende werden mit Standardwert angelegt |
 | `einstellungSetzen` | ändert `schluessel` auf `wert` (nur bekannte Schlüssel, geprüft), liefert alle Einstellungen |
 | `status` | `letzterImport`, `letzterImportNeu`, `letzterFehler`, `anzahlAktivitaeten` |
@@ -288,6 +289,7 @@ Die Android-App schickt jeweils die letzten 14 Tage; vorhandene Tage werden übe
 | `schritte` | alle Tage: `{tage: [["YYYY-MM-DD", schritte, alltag, alltagPunkte, unplausibel], …]}` |
 | `spuren` | alle groben Spuren: `{spuren: [[id, sportart, "YYYY-MM-DD", polyline], …], offen}` (`gas/Spuren.gs`) |
 | `spur` | feine Spur einer Aktivität (`id`): `{fein, entferntKm}` |
+| `wartung` | startet eine erlaubte Diagnose oder Einrichtung (`art` = `spurenStand`, `spurFilter`, `spurenNeu`, `abgleich`, `status`): `{titel, protokoll: [Zeilen]}` |
 | `abgleich` | Zeitraum mit Garmin vergleichen (`von`, `bis` als `YYYY-MM-DD`, `uebernehmen=1` zum Übernehmen): `{garmin, sheet, aenderungen: [{art: geaendert/geloescht/neu, id, datum, name, sportart, km, felder: [{feld, alt, neu}]}], uebernommen}` (`gas/Abgleich.gs`) |
 
 Ab v0.9 auch **POST** (`doPost`): Token und Aktion in der URL, Daten als JSON im Rumpf (z. B. `schritteSetzen` mit `daten` und `abschnitte`).
@@ -314,7 +316,7 @@ Die Web-App läuft als Christof („Ausführen als: Ich“) mit Zugriff „Jeder
 /gas/Abgleich.gs                v0.10: Zeitraum mit Garmin abgleichen (Prüfen, Übernehmen)
 /android/                       Android-App (Kotlin): MainActivity (WebView), Bruecke, PruefJob, Pruefung, Melder, Update, Netz, Speicher, Schritte
 /.github/workflows/android.yml  APK bauen, signieren, als Release „apk-<Laufnummer>“ veröffentlichen
-/docs/                          App auf GitHub Pages: index.html, app.js, form.js (Ansicht „Form“), karte.js (Karte), hilfe.js (Erklärungen), style.css, sw.js, manifest.json, icons/
+/docs/                          App auf GitHub Pages: index.html, app.js, form.js (Ansicht „Form“), karte.js (Karte), historie.js (Historie), hilfe.js (Erklärungen), style.css, sw.js, manifest.json, icons/
 /.github/workflows/deploy-gas.yml  Deployment nach Apps Script per clasp
 ```
 
@@ -375,6 +377,12 @@ Für v0.7 (Android-App):
 3. Am Handy https://github.com/obitusde/sport/releases/latest öffnen, APK herunterladen, öffnen, Installation aus dieser Quelle erlauben, installieren.
 4. App öffnen, Benachrichtigungen erlauben. Verbindung ist evtl. neu einzutragen (die App hat einen eigenen Speicher). Unter Einstellungen → Benachrichtigungen „Test“ tippen.
 
+Für v0.11 (Historie, Markierung, Wartung, GPX/TCX):
+
+1. Nichts zu installieren; App einmal ganz schließen und neu öffnen.
+2. In der App: Optionen → Wartung → „Spur-Filter prüfen“. Zeigt bei 10 offenen Spuren, ob GPX/TCX gelesen wird.
+3. Wenn das gut aussieht: Optionen → Wartung → „Spuren nachladen“. Lädt nur die Spuren ohne Ergebnis neu.
+
 Für v0.10 (Karte, Spur-Filter, Abgleich, Jahres-Abzeichen):
 
 1. Nichts zu installieren (keine neue APK). Die App lädt die neue Oberfläche beim nächsten Öffnen; sonst einmal ganz schließen und neu öffnen.
@@ -427,6 +435,7 @@ Für v0.5: nichts einzurichten. Optional `webAppTesten` ausführen: loggt, wie v
 | v0.7 | Android-App: Hülle um die PWA, Benachrichtigungen (konfigurierbar), Updates über GitHub-Releases | Benachrichtigungen |
 | v0.8 | Schrittzähler des Handys: Diagnose, Blatt „Schritte“, Anzeige in Woche und Form | Bewegung im Alltag |
 | v0.9 | Alltagspunkte aus Schritten (einstellbar, ohne Schritte während Aktivitäten); Karte mit allen Spuren als Heatmap, Wanderwege-Ebene, Filter nach Sportart und Jahr, Spur in der Detailansicht, Historie nachladen | Ziel 5, Alltag zählt |
+| v0.11 | Route antippen markiert sie, Höhenmeter auf/ab im Popup, Spuren weit herausgezoomt sichtbar, Reiter „Historie“ zum Suchen und Filtern, Wartung per Knopf, GPX/TCX für ältere Aktivitäten | Alles finden, ohne PC warten |
 | v0.10 | Feedback zu v0.9: Einstellungen neu gesetzt, Karte lädt beim Öffnen neu, Abgleich mit Garmin nach Zeitraum, Spuren besser sichtbar, Heatmap nach Häufigkeit, Detail-Karte größer mit Vollbild, Filter für Zug und GPS-Sprünge, persönliche Jahres-Abzeichen mit Hochrechnung, Höhenmeter ohne Pistenski | Karte und Abzeichen alltagstauglich |
 
 ### Ideen für später
@@ -452,6 +461,7 @@ Für v0.5: nichts einzurichten. Optional `webAppTesten` ausführen: loggt, wie v
 
 | Version | Datum | Änderung |
 |---|---|---|
+| 0.11.0 | 2026-11-18 | v0.11: `gas/Spuren.gs` 0.11.0 (GPX/TCX mit `xmlPunkte_`, `SPUR_VERSION` 3 nur für Spuren ohne Ergebnis, `spurenStand`), `gas/WebApp.gs` 0.11.0 (Spalten `hmAb`, `ort`, Aktion `wartung`), `gas/Hilfen.gs` 0.11.0 (Protokoll mitschneiden). Oberfläche 0.11.0: `docs/historie.js` (neu, Reiter „Historie“), `docs/karte.js` (Markierung, Höhenmeter im Popup, Breite je Zoom, Punkte je Spur), `docs/app.js` (Wartung, Scroll-Position, Tausender mit Apostroph auch bei km), `docs/index.html` (sechs Reiter, „Optionen“), `docs/style.css`, `docs/hilfe.js`, `docs/sw.js`. Android unverändert |
 | 0.10.1 | 2026-11-18 | `gas/Spuren.gs` 0.10.1: `diagnoseSpurFilter` meldete bei 40 von 40 Spuren „keine“; die Diagnose loggt jetzt den Grund (HTTP, Größe, ZIP, FIT gefunden, Lesefehler, Filter). Schutz: Gute vorhandene Spuren werden nicht durch ein Ergebnis ohne Spur ersetzt, nach 5 solchen Fällen hintereinander bricht das Nachladen ab |
 | 0.10.0 | 2026-11-18 | v0.10: `gas/Spuren.gs` 0.10.0 (Spur-Filter für Zug und GPS-Sprünge, Zeitstempel aus FIT, Spalten `version` und `entfernt_km`, Neuberechnung älterer Spuren, `diagnoseSpurFilter`), `gas/Abgleich.gs` 0.10.0 (neu, `diagnoseAbgleich`), `gas/WebApp.gs` 0.10.0 (Aktion `abgleich`), `gas/Meldungen.gs` 0.10.0 (persönliche Jahres-Abzeichen), `gas/Sammler.gs` 0.10.0 (nur Kommentare). Oberfläche 0.10.0: `docs/karte.js` (Heatmap nach Häufigkeit, Sichtbarkeit, Vollbild, Neuladen), `docs/app.js` (Jahres-Abzeichen, Abgleich, Einstellungen, Detail-Karte oben), `docs/style.css`, `docs/hilfe.js`, `docs/sw.js`, `docs/index.html`. Android unverändert (0.9.0) |
 | 0.9.0 | 2026-11-18 | v0.9: Alltagspunkte (`gas/Schritte.gs` 0.9.0 mit Schrittabschnitten und Abzug während Aktivitäten, `gas/WebApp.gs` 0.9.0 mit `doPost`, Einstellungen `alltagPunkte`/`alltagFrei`/`alltagProPunkt`, Aktionen `spuren`/`spur`; `gas/Meldungen.gs` 0.9.0 Punkte inkl. Alltag). Spuren (`gas/Spuren.gs` 0.9.0 neu, `gas/Sammler.gs` 0.9.0 lädt Spuren neuer Aktivitäten). Android 0.9.0 (Messabschnitte, Übertragung per POST). Oberfläche 0.9.0: Karte (`docs/karte.js` neu), Spur in der Detailansicht, Alltagspunkte in Woche/Form/Einstellungen, Erklär-Seite. Entscheidung: Spuren im Sheet statt Drive. Umgebung der Cloud-Sitzung: freier Internetzugang auf Wunsch von Christof |

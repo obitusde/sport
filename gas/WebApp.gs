@@ -1,6 +1,6 @@
 /**
  * WebApp.gs – Schnittstelle für die App (JSON)
- * Version: 0.10.0 (2026-11-18)
+ * Version: 0.11.0 (2026-11-18)
  *
  * Aufruf: GET <webapp-url>?token=<WEBAPP_TOKEN>&aktion=<aktion>&...
  *
@@ -18,6 +18,7 @@
  * | spuren            | alle groben Spuren für die Karte: {spuren: [[id, sportart, datum, polyline]], offen} |
  * | spur              | feine Spur einer Aktivität (id): {fein, entferntKm}             |
  * | abgleich          | Zeitraum mit Garmin vergleichen (von, bis, uebernehmen=1), siehe Abgleich.gs |
+ * | wartung           | Diagnose oder Einrichtung starten (art), liefert das Protokoll  |
  *
  * Jede Antwort ist JSON: {ok: true, version, …} oder {ok: false, fehler}.
  * Ohne gültiges Token liefert die Web-App keine Daten.
@@ -46,9 +47,23 @@
  *   „sammeln“ lädt auch die Spuren neuer Aktivitäten (höchstens 20 Sekunden).
  * Änderungen 0.10.0: Aktion „abgleich“ (Abgleich.gs); „spur“ liefert entferntKm (Kilometer,
  *   die der Spur-Filter als Zugfahrt oder GPS-Sprung entfernt hat).
+ * Änderungen 0.11.0: Liste enthält hmAb (Höhenmeter abwärts) und ort (Garmins Ortsname) aus
+ *   der Spalte „details“. Aktion „wartung“: startet eine feste Auswahl von Diagnosen und
+ *   Einrichtungen (WARTUNG) und liefert deren Protokoll, damit dafür kein PC nötig ist.
  */
 
-const WEBAPP_VERSION = '0.10.0';
+const WEBAPP_VERSION = '0.11.0';
+
+/**
+ * Wartung aus der App: nur diese Funktionen sind erlaubt. Alle loggen nur Zählungen.
+ */
+const WARTUNG = {
+  spurenStand: { text: 'Stand der Spuren', fn: function () { spurenStand(); } },
+  spurFilter: { text: 'Spur-Filter prüfen (10 offene Spuren)', fn: function () { diagnoseSpurFilter(10); } },
+  spurenNeu: { text: 'Spuren nachladen (Zeitgeber)', fn: function () { spurenZeitgeberEinrichten(); spurenStand(); } },
+  abgleich: { text: 'Abgleich-Diagnose (30 Tage)', fn: function () { diagnoseAbgleich(); } },
+  status: { text: 'Status des Sammlers', fn: function () { statusZeigen(); } }
+};
 const PUNKTE_AB_JAHR = 2023;
 const BLATT_KONFIGURATION = 'Konfiguration';
 
@@ -106,7 +121,7 @@ const EINSTELLUNGEN = {
 
 /** Spalten der kompakten Aktivitätsliste für die App. */
 const APP_SPALTEN = ['id', 'start', 'sportart', 'typ', 'name', 'km', 'min', 'minGesamt', 'hm', 'puls', 'gps',
-  'pkt', 'pktGeschaetzt', 's1k', 's5k', 's10k', 's21k'];
+  'pkt', 'pktGeschaetzt', 's1k', 's5k', 's10k', 's21k', 'hmAb', 'ort'];
 
 // ---------------------------------------------------------------------------
 // Einstieg
@@ -218,6 +233,11 @@ function aktionAusfuehren_(p) {
       return Object.assign(basis, { id: String(p.id), details: detailsLesen_(p.id) });
     case 'abgleich':
       return Object.assign(basis, abgleich_(p.von, p.bis, String(p.uebernehmen) === '1'));
+    case 'wartung': {
+      const w = WARTUNG[p.art];
+      if (!w) throw new Error('unbekannte Wartung: ' + p.art);
+      return Object.assign(basis, { art: p.art, titel: w.text, protokoll: protokollMitschneiden_(w.fn) });
+    }
     case 'sammeln': {
       const e = sammelnIntern_(false, { mail: false, spurenSekunden: 20 });
       if (e.fehler) throw new Error(e.fehler);
@@ -306,7 +326,9 @@ function aktivitaetenKompakt_() {
       split(d.split1kS),
       split(d.split5kS),
       split(d.split10kS),
-      split(d.split21kS)
+      split(d.split21kS),
+      typeof d.hmAb === 'number' ? d.hmAb : null,
+      d.ort || null
     ];
   });
   return { spalten: APP_SPALTEN, zeilen: zeilen, punkteAbJahr: PUNKTE_AB_JAHR, punkteFaktoren: faktoren };

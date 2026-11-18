@@ -1,6 +1,9 @@
 /**
  * Hilfen.gs – allgemeine Hilfsfunktionen
- * Version: 0.2.0 (2026-11-17)
+ * Version: 0.11.0 (2026-11-18)
+ *
+ * Änderungen 0.11.0: log_ kann Zeilen zusätzlich sammeln (protokollMitschneiden_), damit die
+ * Wartung in der App das Protokoll einer Diagnose anzeigen kann.
  */
 
 const ZEITZONE = 'Europe/Zurich';
@@ -41,8 +44,25 @@ function runden_(zahl, stellen) {
   return Math.round(zahl * f) / f;
 }
 
+/** Gesammelte Protokollzeilen, solange protokollMitschneiden_ läuft (sonst null). */
+let PROTOKOLL_PUFFER = null;
+
 function log_(text) {
   console.log(text);
+  if (PROTOKOLL_PUFFER) PROTOKOLL_PUFFER.push(String(text));
+}
+
+/** Führt fn aus und liefert alle dabei geloggten Zeilen (Fehler als letzte Zeile). */
+function protokollMitschneiden_(fn) {
+  PROTOKOLL_PUFFER = [];
+  try {
+    fn();
+  } catch (e) {
+    PROTOKOLL_PUFFER.push('FEHLER: ' + e.message);
+  }
+  const zeilen = PROTOKOLL_PUFFER;
+  PROTOKOLL_PUFFER = null;
+  return zeilen;
 }
 
 /** Loggt lange Texte in Stücken, damit das Protokoll nichts abschneidet. */
