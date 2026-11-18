@@ -1,6 +1,6 @@
 /**
  * touren.js – Mehrtagestouren erkennen und anzeigen
- * Version: 0.12.0 (2026-11-18)
+ * Version: 0.13.0 (2026-11-18)
  *
  * Erkennung (entschieden mit Christof 2026-11-18), nur Wandern oder nur Rad pro Tour:
  * - Etappe = Aktivität von A nach B. Die nächste Etappe beginnt höchstens TOUR_ANSCHLUSS_KM
@@ -18,6 +18,18 @@
  * Start- und Endpunkt kommen aus den Spuren (karte.js), die Korrekturen (Name, aufgelöst,
  * Aktivität ohne Tour, Aktivität von Hand zu einer Tour) aus der Web-App (gas/Touren.gs).
  * Eine Tour wird über die activityId ihrer ersten erkannten Etappe angesprochen.
+ *
+ * Änderungen 0.13.0 (Feedback zu echten Touren: Ferien in Albenga, Tagesausflüge ab Zuhause):
+ * - Übernachtung an einem häufigen Ort (Zuhause, Arbeit) beendet eine Tour; am Anfang und am
+ *   Ende darf eine Tour zu Hause liegen.
+ * - Eine Tour braucht mindestens eine Übernachtung unterwegs.
+ * - Lücke am nächsten Tag nur, wenn die Tour schon eine Übernachtung unterwegs hat.
+ * - Die Mindestentfernung von 20 km muss ein zusammenhängend gefahrenes Stück schaffen
+ *   (Lücken zählen nicht).
+ * - Mehr als zwei Nächte am selben Ort = Ferien-Standort, keine Tour.
+ * - Orte unterwegs: Ortsliste aus GeoNames (daten/orte.txt, offline, die Spur verlässt das
+ *   Handy nicht). Etappe „Start → Ziel, über …“ und Zeile „über …“ für die ganze Tour; der
+ *   automatische Name ist „Ort beim ersten Punkt → Ort beim letzten Punkt“.
  * Nutzt Funktionen und Konstanten aus app.js und karte.js.
  */
 'use strict';
@@ -30,6 +42,9 @@ const TOUR_RUNDE_KM = 1.5;
 const TOUR_AUSDEHNUNG_KM = 20;
 const HAEUFIG_ZELLE_KM = 0.5;
 const HAEUFIG_MIN = 15;
+const STANDORT_NAECHTE = 3;  // so viele Nächte am selben Ort = Ferien-Standort
+const ORT_NAH_KM = 1.5;      // Orte so nah an der Spur gelten als „über“
+const ORT_ZIEL_KM = 8;       // nächster Ort für Start und Ziel einer Etappe
 /** Farben der Tage auf der Tour-Karte (wiederholen sich nach 8 Tagen). */
 const TAG_FARBEN = ['#d63c12', '#1650c7', '#0f7a33', '#8a2fc4', '#c27c00', '#0a8a8a', '#c4307a', '#4d5bd6'];
 
@@ -68,7 +83,7 @@ function korrekturenAuswerten() {
  */
 function tourenErgebnis() {
   if (!karteZustand.spuren) return null;
-  const schluessel = karteZustand.spuren.length + ':' + zustand.aktivitaeten.length + ':' + JSON.stringify(tourenZustand.korrekturen);
+  const schluessel = karteZustand.spuren.length + ':' + zustand.aktivitaeten.length + ':' + JSON.stringify(tourenZustand.korrekturen) + ':' + !!orteDaten.liste;
   const c = tourenZustand.cache;
   if (c && c.schluessel === schluessel && c.spuren === karteZustand.spuren && c.aktivitaeten === zustand.aktivitaeten) return c.ergebnis;
   const ergebnis = tourenErkennen();
@@ -113,6 +128,7 @@ function tourenErkennen() {
     const liste = alle.filter(x => x.a.sportart === sportart && zaehlt(x.a) && !k.ohne.has(x.a.id) &&
       !(!x.runde && haeufig(x.start) && haeufig(x.ende))).sort((x, y) => x.a.datum - y.a.datum);
     let kette = null;
+    const neueKette = x => ({ sportart, teile: [{ x, art: 'etappe' }], punkt: x.ende, letzterTag: x.tag, anschluesse: 0, naechte: [] });
     liste.forEach(x => {
       if (x.runde) {
         if (kette && x.tag - kette.letzterTag <= TOUR_PAUSE_TAGE + 1 && abstandKm(kette.punkt, x.start) <= TOUR_ANSCHLUSS_KM) {
@@ -124,22 +140,28 @@ function tourenErkennen() {
       if (kette) {
         const d = abstandKm(kette.punkt, x.start);
         const pause = x.tag - kette.letzterTag;
-        if (pause <= TOUR_PAUSE_TAGE + 1 && d <= TOUR_ANSCHLUSS_KM) {
+        const zuHause = haeufig(kette.punkt);
+        if (pause <= TOUR_PAUSE_TAGE + 1 && d <= TOUR_ANSCHLUSS_KM && !(pause >= 1 && zuHause)) {
+          // Normaler Anschluss; über Nacht nur, wenn nicht zu Hause übernachtet
           kette.teile.push({ x, art: 'etappe' });
           kette.anschluesse++;
+          if (pause >= 1) kette.naechte.push(kette.punkt);
           kette.punkt = x.ende;
           kette.letzterTag = x.tag;
           return;
         }
-        if (d <= TOUR_SPRUNG_KM && (pause === 0 || (pause === 1 && kette.anschluesse >= 1))) {
-          kette.teile.push({ x, art: 'etappe' });
+        if (d > TOUR_ANSCHLUSS_KM && d <= TOUR_SPRUNG_KM && !zuHause &&
+          (pause === 0 || (pause === 1 && kette.naechte.length >= 1))) {
+          // Lücke (z. B. Zug zwischen zwei Aufzeichnungen)
+          kette.teile.push({ x, art: 'etappe', sprung: true });
+          if (pause >= 1) kette.naechte.push(kette.punkt);
           kette.punkt = x.ende;
           kette.letzterTag = x.tag;
           return;
         }
         ketten.push(kette);
       }
-      kette = { sportart, teile: [{ x, art: 'etappe' }], punkt: x.ende, letzterTag: x.tag, anschluesse: 0 };
+      kette = neueKette(x);
     });
     if (kette) ketten.push(kette);
   });
@@ -148,10 +170,17 @@ function tourenErkennen() {
   const touren = [];
   ketten.forEach(kt => {
     const etappen = kt.teile.filter(t => t.art === 'etappe');
-    if (etappen.length < 2 || kt.anschluesse < 1) return;
+    if (etappen.length < 2 || kt.anschluesse < 1 || !kt.naechte.length) return;
     if (new Set(etappen.map(t => t.x.tag)).size < 2) return;
-    const anfang = etappen[0].x.start;
-    const weite = Math.max(...etappen.map(t => Math.max(abstandKm(anfang, t.x.start), abstandKm(anfang, t.x.ende))));
+    // Ferien-Standort: mehr als zwei Nächte am selben Ort
+    if (kt.naechte.some(p => kt.naechte.filter(q => abstandKm(p, q) <= TOUR_ANSCHLUSS_KM).length >= STANDORT_NAECHTE)) return;
+    // Mindestentfernung innerhalb eines zusammenhängend gefahrenen Stücks (ohne Lücken)
+    let weite = 0;
+    let anfang = null;
+    etappen.forEach(t => {
+      if (!anfang || t.sprung) anfang = t.x.start;
+      weite = Math.max(weite, abstandKm(anfang, t.x.start), abstandKm(anfang, t.x.ende));
+    });
     if (weite < TOUR_AUSDEHNUNG_KM) return;
     touren.push({ schluessel: etappen[0].x.a.id, sportart: kt.sportart, teile: kt.teile.slice() });
   });
@@ -195,12 +224,25 @@ function tourenErkennen() {
     const vonTag = t.teile[0].x.tag;
     const bisTag = t.teile[t.teile.length - 1].x.tag;
     const letzteEtappe = etappen.length ? etappen[etappen.length - 1].x.a : letzte;
-    const autoName = erste.ort && letzteEtappe.ort && erste.ort !== letzteEtappe.ort
-      ? erste.ort + ' → ' + letzteEtappe.ort
-      : (t.sportart === 'rad' ? 'Radtour ' : 'Wandertour ') + MONATE[erste.datum.getMonth()] + ' ' + erste.datum.getFullYear();
+    // Orte unterwegs (nur wenn die Ortsliste geladen ist)
+    const spurProIdOrte = orteDaten.liste ? new Map(karteZustand.spuren.map(sp => [sp.id, sp])) : null;
+    let ueber = [];
+    if (spurProIdOrte) {
+      t.teile.forEach(tt => {
+        const sp = spurProIdOrte.get(tt.x.a.id);
+        tt.orte = sp && sp.teile && sp.teile.length ? etappenOrte(sp.teile) : null;
+      });
+      ueber = tourUeber(t.teile);
+    }
+    const startOrt = etappen.length && etappen[0].orte && etappen[0].orte.start;
+    const zielOrt = etappen.length && etappen[etappen.length - 1].orte && etappen[etappen.length - 1].orte.ziel;
+    const autoName = startOrt && zielOrt && startOrt !== zielOrt ? startOrt + ' → ' + zielOrt
+      : erste.ort && letzteEtappe.ort && erste.ort !== letzteEtappe.ort ? erste.ort + ' → ' + letzteEtappe.ort
+        : (t.sportart === 'rad' ? 'Radtour ' : 'Wandertour ') + MONATE[erste.datum.getMonth()] + ' ' + erste.datum.getFullYear();
     const tour = Object.assign(t, {
       name: k.name.get(t.schluessel) || autoName,
       autoName,
+      ueber,
       von: erste.datum,
       bis: letzte.datum,
       tage: bisTag - vonTag + 1,
@@ -220,6 +262,115 @@ function tourenErkennen() {
   });
   ergebnis.sort((x, y) => y.von - x.von);
   return { touren: ergebnis, proAktivitaet };
+}
+
+// ---------------------------------------------------------------------------
+// Orte unterwegs (GeoNames, daten/orte.txt)
+// ---------------------------------------------------------------------------
+
+const orteDaten = { liste: null, raster: null, versprechen: null };
+const ORT_RASTER = 0.1; // Grad
+
+/** Lädt die Ortsliste einmal; danach werden Touren mit Orten neu berechnet. */
+function orteLaden() {
+  if (orteDaten.liste || orteDaten.versprechen) return orteDaten.versprechen || Promise.resolve();
+  orteDaten.versprechen = fetch('daten/orte.txt').then(r => {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.text();
+  }).then(text => {
+    const liste = [];
+    const raster = new Map();
+    text.split('\n').forEach(zeile => {
+      if (!zeile || zeile[0] === '#') return;
+      const [name, la, lo, ew] = zeile.split('|');
+      const o = { name, la: Number(la), lo: Number(lo), ew: Number(ew) };
+      const key = Math.floor(o.la / ORT_RASTER) + ',' + Math.floor(o.lo / ORT_RASTER);
+      if (!raster.has(key)) raster.set(key, []);
+      raster.get(key).push(o);
+      liste.push(o);
+    });
+    orteDaten.liste = liste;
+    orteDaten.raster = raster;
+    tourenZustand.cache = null;
+    if (['tour', 'historie', 'detail', 'erfolge'].indexOf(zustand.ansicht) >= 0) zeichnen();
+  }).catch(() => { orteDaten.versprechen = null; });
+  return orteDaten.versprechen;
+}
+
+/** Orte im Umkreis (km) eines Punkts. */
+function orteUm(p, km) {
+  const r = Math.ceil(km / 111 / ORT_RASTER) + 1;
+  const bx = Math.floor(p[0] / ORT_RASTER);
+  const by = Math.floor(p[1] / ORT_RASTER);
+  const treffer = [];
+  for (let i = -r; i <= r; i++) {
+    for (let j = -r; j <= r; j++) {
+      (orteDaten.raster.get((bx + i) + ',' + (by + j)) || []).forEach(o => {
+        const d = abstandKm(p, [o.la, o.lo]);
+        if (d <= km) treffer.push({ o, d });
+      });
+    }
+  }
+  return treffer;
+}
+
+function naechsterOrt(p) {
+  const t = orteUm(p, ORT_ZIEL_KM);
+  if (!t.length) return null;
+  // Nächster Ort, größere Orte leicht bevorzugt (Stadtrand statt Nachbardorf)
+  t.sort((x, y) => (x.d - Math.log10(x.o.ew) * 0.3) - (y.d - Math.log10(y.o.ew) * 0.3));
+  return t[0].o.name;
+}
+
+/** Start, Ziel und Orte unterwegs einer Spur (in Reihenfolge der Durchfahrt). */
+function etappenOrte(teile) {
+  const start = teile[0][0];
+  const letztes = teile[teile.length - 1];
+  const ende = letztes[letztes.length - 1];
+  const gesehen = new Map(); // Name → {o, reihenfolge}
+  let n = 0;
+  teile.forEach(teil => {
+    for (let i = 0; i < teil.length; i++) {
+      const a = teil[i];
+      const b = teil[i + 1] || a;
+      const schritte = Math.max(1, Math.ceil(abstandKm(a, b) / 0.5));
+      for (let s = 0; s < schritte; s++) {
+        const p = [a[0] + (b[0] - a[0]) * s / schritte, a[1] + (b[1] - a[1]) * s / schritte];
+        n++;
+        orteUm(p, ORT_NAH_KM).forEach(({ o }) => { if (!gesehen.has(o.name)) gesehen.set(o.name, { o, reihenfolge: n }); });
+      }
+    }
+  });
+  const startOrt = naechsterOrt(start);
+  const zielOrt = naechsterOrt(ende);
+  // Ohne Start- und Zielort und ohne Orte direkt daneben (Vororte)
+  const unterwegs = Array.from(gesehen.values()).filter(x => x.o.name !== startOrt && x.o.name !== zielOrt &&
+    abstandKm([x.o.la, x.o.lo], start) > 3 && abstandKm([x.o.la, x.o.lo], ende) > 3);
+  const groesste = unterwegs.slice().sort((x, y) => y.o.ew - x.o.ew).slice(0, 3);
+  return {
+    start: startOrt, ziel: zielOrt,
+    ueber: groesste.sort((x, y) => x.reihenfolge - y.reihenfolge).map(x => x.o.name),
+    alle: unterwegs
+  };
+}
+
+/** Die 5 größten Orte der ganzen Tour (ohne Start und Ziel), in Reihenfolge der Durchfahrt. */
+function tourUeber(teile) {
+  const etappen = teile.filter(tt => tt.art === 'etappe' && tt.orte);
+  if (!etappen.length) return [];
+  const start = etappen[0].orte.start;
+  const ziel = etappen[etappen.length - 1].orte.ziel;
+  const kandidaten = [];
+  etappen.forEach((tt, i) => {
+    tt.orte.alle.forEach(x => kandidaten.push({ name: x.o.name, ew: x.o.ew, pos: i * 1e6 + x.reihenfolge }));
+    if (i < etappen.length - 1 && tt.orte.ziel) {
+      const o = orteDaten.liste.find(y => y.name === tt.orte.ziel);
+      kandidaten.push({ name: tt.orte.ziel, ew: o ? o.ew : 0, pos: i * 1e6 + 9e5 });
+    }
+  });
+  const eindeutig = new Map();
+  kandidaten.forEach(c => { if (c.name !== start && c.name !== ziel && !eindeutig.has(c.name)) eindeutig.set(c.name, c); });
+  return Array.from(eindeutig.values()).sort((x, y) => y.ew - x.ew).slice(0, 5).sort((x, y) => x.pos - y.pos).map(c => c.name);
 }
 
 function tourFinden(schluessel) {
@@ -276,6 +427,7 @@ function tourEintrag(t) {
     <span class="eintrag-text">
       <span class="eintrag-name">${esc(t.name)}</span>
       <span class="eintrag-werte">${esc(zeitraumText(t.von, t.bis))}</span>
+      ${t.ueber && t.ueber.length ? `<span class="eintrag-werte">über ${esc(t.ueber.slice(0, 3).join(', '))}</span>` : ''}
       <span class="eintrag-werte">${esc(tourZahlen(t))}</span>
       <span class="eintrag-werte"><b>${km(t.km)}</b> · ↑ ${zahlFormat0.format(t.hm)} m · ${dauer(t.min)}</span>
     </span>
@@ -285,6 +437,7 @@ function tourEintrag(t) {
 
 /** Liste der Touren für die Historie (Filter Suche, Sportart, Jahr). */
 function tourenListeHtml(filter) {
+  orteLaden();
   const e = tourenErgebnis();
   if (!e) {
     spurenLaden(false);
@@ -295,7 +448,7 @@ function tourenListeHtml(filter) {
     if (filter.sportarten.size && !filter.sportarten.has(t.sportart)) return false;
     if (filter.jahr !== 'alle' && t.von.getFullYear() !== Number(filter.jahr) && t.bis.getFullYear() !== Number(filter.jahr)) return false;
     if (woerter.length) {
-      const heu = suchText([t.name, t.autoName, SPORT_NAME[t.sportart], t.von.getFullYear(), MONATE[t.von.getMonth()]]
+      const heu = suchText([t.name, t.autoName, (t.ueber || []).join(' '), SPORT_NAME[t.sportart], t.von.getFullYear(), MONATE[t.von.getMonth()]]
         .concat(t.teile.map(tt => tt.x.a.name + ' ' + (tt.x.a.ort || ''))).join(' '));
       if (!woerter.every(w => heu.indexOf(w) >= 0)) return false;
     }
@@ -317,6 +470,7 @@ function tourOeffnen(schluessel) {
 }
 
 function ansichtTour() {
+  orteLaden();
   const zurueck = `<button class="knopf klein zurueck" data-aktion="zurueck">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg> Zurück</button>`;
   const e = tourenErgebnis();
@@ -330,7 +484,8 @@ function ansichtTour() {
   let html = zurueck + `<header class="detail-kopf" style="--farbe: var(--${t.sportart})">
     <span class="detail-marke" aria-hidden="true"></span>
     <div><h1>${esc(t.name)}</h1>
-    <span class="leise">${t.sportart === 'rad' ? 'Radtour' : 'Wandertour'} · ${esc(zeitraumText(t.von, t.bis))}</span></div>
+    <span class="leise">${t.sportart === 'rad' ? 'Radtour' : 'Wandertour'} · ${esc(zeitraumText(t.von, t.bis))}</span>
+    ${t.ueber && t.ueber.length ? `<span class="leise tour-ueber">über ${esc(t.ueber.join(', '))}</span>` : ''}</div>
   </header>`;
   html += `<section class="karte karte-detail-rahmen"><div id="tour-karte" class="detail-karte" role="region" aria-label="Karte der Tour"></div></section>`;
   html += '<div class="kennzahlen">' + [
@@ -364,7 +519,9 @@ function ansichtTour() {
         <span class="eintrag-marke" aria-hidden="true"></span>
         <span class="eintrag-text">
           <span class="eintrag-werte">Tag ${tagNr} · ${TAGE_KURZ[(a.datum.getDay() + 6) % 7]} ${a.datum.getDate()}. ${MONATE[a.datum.getMonth()]} · ${marke}${tt.manuell ? ' · von Hand' : ''}</span>
-          <span class="eintrag-name">${esc(a.name || SPORT_NAME[a.sportart])}</span>
+          <span class="eintrag-name">${esc(tt.orte && tt.orte.start && tt.orte.ziel && tt.art === 'etappe' ? tt.orte.start + ' → ' + tt.orte.ziel : a.name || SPORT_NAME[a.sportart])}</span>
+          ${tt.orte && tt.orte.ueber.length ? `<span class="eintrag-werte">über ${esc(tt.orte.ueber.join(', '))}</span>` : ''}
+          ${tt.orte && tt.orte.start && tt.art === 'etappe' && a.name ? `<span class="eintrag-werte">${esc(a.name)}</span>` : ''}
           <span class="eintrag-werte">${esc(werte.join(' · '))}</span>
           ${tt.luecke ? `<span class="eintrag-werte tour-luecke">Lücke davor: ${km(tt.luecke)} (z. B. Zug)</span>` : ''}
         </span>
@@ -398,9 +555,14 @@ async function tourKarteNachZeichnen() {
   if (karteZustand.tourKarte) karteZustand.tourKarte.remove();
   const karte = L.map(flaeche, { scrollWheelZoom: false, maxZoom: 19 });
   karteZustand.tourKarte = karte;
-  kachelEbene(KACHELN.swisstopoGrau, { opacity: 0.7, attribution: '© swisstopo' }).addTo(karte);
-  vollbildKnopf('tour').addTo(karte);
   const spurProId = new Map(karteZustand.spuren.map(s => [s.id, s]));
+  const alleGrenzen = L.latLngBounds([]);
+  t.teile.forEach(tt => {
+    const s = spurProId.get(tt.x.a.id);
+    if (s && s.teile) s.teile.forEach(teil => alleGrenzen.extend(L.latLngBounds(teil)));
+  });
+  kartenEbenen(karte, inDerSchweiz(alleGrenzen) ? karteZustand.grundkarte : 'osm', 0.7);
+  vollbildKnopf('tour').addTo(karte);
   const grenzen = L.latLngBounds([]);
   const ersterTag = t.teile[0].x.tag;
   t.teile.forEach(tt => {

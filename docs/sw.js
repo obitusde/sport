@@ -1,6 +1,6 @@
 /**
  * sw.js – Service Worker der Sport-App
- * Version: 0.12.0 (2026-11-18)
+ * Version: 0.13.0 (2026-11-18)
  *
  * Hält die App-Dateien für den Offline-Betrieb bereit.
  * Strategie: zuerst Netz (damit Updates sofort ankommen), sonst Cache.
@@ -9,8 +9,8 @@
  * Ab 0.9.0: Der Cache „sport-daten“ (Spuren für die Karte, von karte.js) bleibt bei
  * Updates erhalten; nur alte App-Caches werden gelöscht.
  */
-const CACHE = 'sport-0.12.0';
-const DATEIEN = ['./', 'index.html', 'style.css', 'app.js', 'form.js', 'hilfe.js', 'karte.js', 'historie.js', 'touren.js', 'manifest.json',
+const CACHE = 'sport-0.13.0';
+const DATEIEN = ['./', 'index.html', 'style.css', 'app.js', 'form.js', 'hilfe.js', 'karte.js', 'historie.js', 'touren.js', 'daten/orte.txt', 'manifest.json',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', ereignis => {

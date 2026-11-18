@@ -1,6 +1,6 @@
 /**
  * hilfe.js – Erklär-Seite „So funktioniert die App“
- * Version: 0.12.0 (2026-11-18)
+ * Version: 0.13.0 (2026-11-18)
  *
  * Erreichbar über das „?“ in „Form“ und „Erfolge“ sowie über die Einstellungen.
  * Werte wie Ziele und Grenzen werden aus app.js gelesen, damit der Text stimmt,
@@ -103,12 +103,14 @@ function ansichtHilfe() {
       <p>Filtern kannst du nach Sportart (mehrere wählbar), Jahr, Länge und Ort (Garmins Ortsname, Orte ab zwei Aktivitäten), sortieren nach Datum, Distanz, Höhenmeter oder Dauer. Oben steht die Summe der Treffer. Tippen öffnet die Details, „Zurück“ führt an dieselbe Stelle der Liste.</p>`)}
 
     ${abschnitt('Mehrtagestouren', `
-      <p>Die App erkennt Wander- und Radtouren über mehrere Tage automatisch: Eine <b>Etappe</b> beginnt ungefähr dort (bis 3 km), wo die vorherige aufgehört hat, mit höchstens 2 Pausentagen dazwischen. Eine Tour hat nur eine Sportart, mindestens zwei Etappen an verschiedenen Tagen und entfernt sich mindestens 20 km vom Start.</p>
+      <p>Die App erkennt Wander- und Radtouren über mehrere Tage automatisch: Eine <b>Etappe</b> beginnt ungefähr dort (bis 3 km), wo die vorherige aufgehört hat, mit höchstens 2 Pausentagen dazwischen. Eine Tour hat nur eine Sportart, mindestens zwei Etappen an verschiedenen Tagen, mindestens <b>eine Übernachtung unterwegs</b> und entfernt sich am Stück mindestens 20 km vom Start.</p>
+      <p>Keine Tour sind: Ausflüge, zwischen denen du <b>zu Hause</b> geschlafen hast (Start und Ende einer Tour dürfen zu Hause liegen), und Ferien an einem <b>Standort</b> (mehr als zwei Nächte am selben Ort).</p>
       <ul>
         <li><b>Ausflug:</b> eine Rundtour am Etappenort, z. B. wenn du zweimal am selben Ort übernachtest.</li>
-        <li><b>Lücke:</b> Zwischen zwei Aufzeichnungen am selben Tag (oder am nächsten Tag mitten in einer Tour) darf die nächste Etappe auch weiter weg beginnen, z. B. nach einem Stück mit dem Zug. Auf der Karte ist dort keine Linie.</li>
+        <li><b>Lücke:</b> Zwischen zwei Aufzeichnungen am selben Tag (oder am nächsten Tag, wenn du schon unterwegs übernachtet hast) darf die nächste Etappe auch weiter weg beginnen, z. B. nach einem Stück mit dem Zug. Auf der Karte ist dort keine Linie.</li>
         <li><b>Pendeln</b> zählt nie: Fahrten zwischen zwei Orten, an denen du sehr oft startest oder ankommst (z. B. Zuhause und Arbeit), gehören zu keiner Tour.</li>
       </ul>
+      <p><b>Orte:</b> Start und Ziel jeder Etappe und die größeren Orte unterwegs („über …“) kommen aus einer Ortsliste in der App (GeoNames, CC BY 4.0). Deine Spuren verlassen dafür das Handy nicht. Die Karte lässt sich oben rechts umschalten; außerhalb der Schweiz beginnt sie mit OpenStreetMap.</p>
       <p>Touren findest du unter Historie → „Touren“, in den Erfolgen und auf der Karte (Filter „Nur Touren“). Die Tour-Seite zeigt alle Etappen auf einer Karte, jeden Tag in einer eigenen Farbe, dazu Summen und die Etappenliste mit Pausentagen.</p>
       <p><b>Korrigieren:</b> Auf der Tour-Seite umbenennen, mit „×“ eine Aktivität herausnehmen oder die ganze Tour auflösen. Fehlt eine Aktivität, öffne sie und tippe auf „Zu Tour hinzufügen“. Die Korrekturen gelten auf allen Geräten.</p>`)}
 

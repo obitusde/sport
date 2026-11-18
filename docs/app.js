@@ -1,6 +1,6 @@
 /**
  * app.js – Sport-App
- * Version: 0.12.0 (2026-11-18)
+ * Version: 0.13.0 (2026-11-18)
  *
  * Ansichten: Woche, Einstellungen.
  * Die App holt die Aktivitäten als Liste von der Apps-Script-Web-App und rechnet
@@ -48,10 +48,12 @@
  * Touren in Historie, Karte und Erfolge; Korrekturen aus der Web-App (Aktion „touren“).
  * Unterseiten (Detail, Tour, Erklärungen) liegen auf einem Stapel, „Zurück“ führt Schritt
  * für Schritt zurück (z. B. Etappe → Tour → Historie).
+ * Änderungen 0.13.0: strengere Tour-Erkennung und Orte unterwegs (touren.js), Kartenwahl auf
+ * allen Karten (karte.js).
  */
 'use strict';
 
-const APP_VERSION = '0.12.0';
+const APP_VERSION = '0.13.0';
 
 const SPEICHER = {
   url: 'sport.url',

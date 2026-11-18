@@ -1,4 +1,4 @@
-/* style.css – Sport-App, Version 0.12.0 (2026-11-18) */
+/* style.css – Sport-App, Version 0.13.0 (2026-11-18) */
 
 :root {
   --hintergrund: #f6f5f2;
@@ -565,3 +565,5 @@ body.vollbild-aktiv { overflow: hidden; }
 }
 .etappen-nr { background: none; border: 0; }
 .popup-tour { display: block; margin-top: 4px; text-align: left; }
+.tour-ueber { display: block; margin-top: 2px; }
+.tour-zeile .eintrag-name { white-space: normal; }

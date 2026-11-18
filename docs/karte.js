@@ -1,6 +1,6 @@
 /**
  * karte.js – Ansicht „Karte“ (Heatmap aller Spuren) und Spur in der Detailansicht
- * Version: 0.12.0 (2026-11-18)
+ * Version: 0.13.0 (2026-11-18)
  *
  * - Grundkarte: graue Landeskarte von swisstopo (WMTS, Web-Mercator), etwas blasser, damit
  *   die Spuren vorne stehen; umschaltbar auf die farbige Landeskarte oder OpenStreetMap.
@@ -24,6 +24,10 @@
  * - Ab 0.12.0: Filter „Nur Touren“ (touren.js), im Popup ein Knopf zur Tour. Die Spuren werden
  *   beim Start aus dem Zwischenspeicher gelesen (für die Touren), vom Netz erst beim Öffnen
  *   der Karte oder einer Tour.
+ * - Ab 0.13.0: Kartenwahl (grau, farbig, OpenStreetMap) auch auf der Detail- und der
+ *   Tour-Karte; die Wahl gilt für alle Karten und bleibt gespeichert. Liegt eine Spur nicht
+ *   ganz in der Schweiz, beginnen Detail- und Tour-Karte mit OpenStreetMap (swisstopo zeigt
+ *   außerhalb nichts).
  * - Die Spuren werden beim Öffnen der Karte neu geladen (zuerst aus dem Cache gezeigt).
  * Leaflet 1.9.4 wird erst beim ersten Öffnen einer Karte von cdnjs geladen (mit SRI-Prüfsumme).
  * Nutzt Funktionen und Konstanten aus app.js (wird vor app.js geladen, aber erst später aufgerufen).
@@ -63,7 +67,7 @@ const karteZustand = {
   filter: { wandern: true, rad: true, ski: true, laufen: false },
   nurTouren: false,
   jahr: 'alle',
-  grundkarte: 'grau',
+  grundkarte: (() => { try { return localStorage.getItem('sport.grundkarte') || 'grau'; } catch (e) { return 'grau'; } })(),
   wanderwege: false,
   sicht: null,        // {mitte, zoom} der letzten Ansicht
   spuren: null,       // [{id, sportart, jahr, datum, pfad, teile}]
@@ -145,6 +149,36 @@ function kachelEbene(url, optionen) {
   const o = Object.assign({ maxNativeZoom: 18, maxZoom: 19 }, optionen);
   if (RETINA && url.indexOf('geo.admin.ch') >= 0) Object.assign(o, { tileSize: 128, zoomOffset: 1, maxNativeZoom: 17 });
   return L.tileLayer(url, o);
+}
+
+/** Liegen die Grenzen (ungefähr) ganz in der Schweiz? */
+function inDerSchweiz(grenzen) {
+  return grenzen && grenzen.isValid() && grenzen.getSouth() >= 45.75 && grenzen.getNorth() <= 47.9 &&
+    grenzen.getWest() >= 5.85 && grenzen.getEast() <= 10.6;
+}
+
+/**
+ * Grundkarten (grau, farbig, OSM) und Wanderwege mit Auswahl oben rechts. Die Wahl wird für
+ * alle Karten gespeichert. deckkraft: wie stark die Landeskarte grau erscheint.
+ */
+function kartenEbenen(karte, start, deckkraft) {
+  const grundkarten = {
+    grau: kachelEbene(KACHELN.swisstopoGrau, { opacity: deckkraft || 0.6, attribution: '© swisstopo' }),
+    farbe: kachelEbene(KACHELN.swisstopo, { opacity: 0.75, attribution: '© swisstopo' }),
+    osm: kachelEbene(KACHELN.osm, { maxNativeZoom: 19, opacity: 0.75, attribution: '© OpenStreetMap-Mitwirkende' })
+  };
+  const wanderwege = kachelEbene(KACHELN.wanderwege, { opacity: 0.9, attribution: 'Wanderwege © swisstopo' });
+  (grundkarten[start] || grundkarten.grau).addTo(karte);
+  if (karteZustand.wanderwege) wanderwege.addTo(karte);
+  L.control.layers({
+    'Landeskarte grau': grundkarten.grau, 'Landeskarte farbig': grundkarten.farbe, 'OpenStreetMap': grundkarten.osm
+  }, { 'Wanderwege (Schweiz)': wanderwege }).addTo(karte);
+  karte.on('baselayerchange', e => {
+    karteZustand.grundkarte = Object.keys(grundkarten).find(k => grundkarten[k] === e.layer) || 'grau';
+    try { localStorage.setItem('sport.grundkarte', karteZustand.grundkarte); } catch (err) { /* egal */ }
+  });
+  karte.on('overlayadd', () => { karteZustand.wanderwege = true; });
+  karte.on('overlayremove', () => { karteZustand.wanderwege = false; });
 }
 
 // ---------------------------------------------------------------------------
@@ -439,23 +473,8 @@ async function karteNachZeichnen() {
   }
   const karte = L.map(flaeche, { preferCanvas: true, maxZoom: 19 }); // ganze Zoomstufen: keine hellen Kachelkanten
   karteZustand.karte = karte;
-  const grundkarten = {
-    grau: kachelEbene(KACHELN.swisstopoGrau, { opacity: 0.6, attribution: '© swisstopo' }),
-    farbe: kachelEbene(KACHELN.swisstopo, { opacity: 0.75, attribution: '© swisstopo' }),
-    osm: kachelEbene(KACHELN.osm, { maxNativeZoom: 19, opacity: 0.7, attribution: '© OpenStreetMap-Mitwirkende' })
-  };
-  const wanderwege = kachelEbene(KACHELN.wanderwege, { opacity: 0.9, attribution: 'Wanderwege © swisstopo' });
-  (grundkarten[karteZustand.grundkarte] || grundkarten.grau).addTo(karte);
-  if (karteZustand.wanderwege) wanderwege.addTo(karte);
-  L.control.layers({
-    'Landeskarte grau': grundkarten.grau, 'Landeskarte farbig': grundkarten.farbe, 'OpenStreetMap': grundkarten.osm
-  }, { 'Wanderwege (Schweiz)': wanderwege }).addTo(karte);
+  kartenEbenen(karte, karteZustand.grundkarte, 0.6);
   vollbildKnopf('karte').addTo(karte);
-  karte.on('baselayerchange', e => {
-    karteZustand.grundkarte = Object.keys(grundkarten).find(k => grundkarten[k] === e.layer) || 'grau';
-  });
-  karte.on('overlayadd', () => { karteZustand.wanderwege = true; });
-  karte.on('overlayremove', () => { karteZustand.wanderwege = false; });
 
   // Grenzen je Spur für Antippen und Zoom
   const liste = gefilterteSpuren();
@@ -645,13 +664,13 @@ async function detailKarteNachZeichnen(id) {
       return;
     }
     if (karteZustand.detailKarte) karteZustand.detailKarte.remove();
-    const karte = L.map(flaeche, { scrollWheelZoom: false, maxZoom: 19 });
-    karteZustand.detailKarte = karte;
-    kachelEbene(KACHELN.swisstopoGrau, { opacity: 0.7, attribution: '© swisstopo' }).addTo(karte);
-    vollbildKnopf('detail').addTo(karte);
     const a = zustand.aktivitaeten.find(x => x.id === id) || {};
     const teile = spurTeile(spur.fein);
     if (!teile.length) return;
+    const karte = L.map(flaeche, { scrollWheelZoom: false, maxZoom: 19 });
+    karteZustand.detailKarte = karte;
+    kartenEbenen(karte, inDerSchweiz(L.latLngBounds([].concat(...teile))) ? karteZustand.grundkarte : 'osm', 0.7);
+    vollbildKnopf('detail').addTo(karte);
     L.polyline(teile, { color: '#fff', weight: 8, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }).addTo(karte);
     const linie = L.polyline(teile, { color: LINIEN_FARBE[a.sportart] || LINIEN_FARBE.wandern, weight: 4.5, opacity: 1, lineCap: 'round', lineJoin: 'round' }).addTo(karte);
     const start = teile[0][0];
