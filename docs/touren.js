@@ -1,6 +1,6 @@
 /**
  * touren.js – Mehrtagestouren erkennen und anzeigen
- * Version: 0.14.0 (2026-11-18)
+ * Version: 0.14.1 (2026-11-18)
  *
  * Erkennung (entschieden mit Christof 2026-11-18), nur Wandern oder nur Rad pro Tour:
  * - Etappe = Aktivität von A nach B. Die nächste Etappe beginnt höchstens TOUR_ANSCHLUSS_KM
@@ -32,6 +32,8 @@
  *   automatische Name ist „Ort beim ersten Punkt → Ort beim letzten Punkt“.
  * Änderungen 0.14.0: Fotos aus dem Fotoschatz (fotos.js) auf der Tour-Seite (Bildstreifen,
  *   Link in den Fotoschatz) und als abschaltbare Ebene „Fotos“ auf der Tour-Karte.
+ * Änderungen 0.14.1: Die Tour-Karte lädt nach dem ersten Bild die feinen Spuren (5 m) der
+ *   Etappen nach (vorher nur grob, 30 m, und dadurch eckig).
  * Nutzt Funktionen und Konstanten aus app.js und karte.js.
  */
 'use strict';
@@ -569,17 +571,19 @@ async function tourKarteNachZeichnen() {
   if (fotos) fotos.addTo(karte);
   vollbildKnopf('tour').addTo(karte);
   const grenzen = L.latLngBounds([]);
+  const feineLinien = [];
   const ersterTag = t.teile[0].x.tag;
   t.teile.forEach(tt => {
     const s = spurProId.get(tt.x.a.id);
     if (!s || !s.teile || !s.teile.length) return;
     const farbe = TAG_FARBEN[(tt.x.tag - ersterTag) % TAG_FARBEN.length];
-    L.polyline(s.teile, { color: '#fff', weight: 8, opacity: 0.95, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(karte);
+    const rand = L.polyline(s.teile, { color: '#fff', weight: 8, opacity: 0.95, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(karte);
     const linie = L.polyline(s.teile, { color: farbe, weight: 4.5, opacity: 1, lineCap: 'round', lineJoin: 'round', dashArray: tt.art === 'ausflug' ? '6 7' : null })
       .bindTooltip(tt.art === 'ausflug' ? 'Ausflug' : 'Etappe ' + tt.nr + ' · Tag ' + (tt.x.tag - ersterTag + 1))
       .on('click', () => detailOeffnen(tt.x.a.id))
       .addTo(karte);
     grenzen.extend(linie.getBounds());
+    feineLinien.push({ id: tt.x.a.id, rand, linie });
     if (tt.art === 'etappe') {
       L.marker(s.teile[0][0], {
         icon: L.divIcon({ className: 'etappen-nr', html: `<span style="background:${farbe}">${tt.nr}</span>`, iconSize: [22, 22] }),
@@ -595,6 +599,23 @@ async function tourKarteNachZeichnen() {
   }
   if (grenzen.isValid()) karte.fitBounds(grenzen, { padding: [24, 24] });
   else karte.setView([46.8, 8.2], 8);
+  // Feine Spuren nachladen, je drei gleichzeitig
+  const warteschlange = feineLinien.slice();
+  const arbeiter = async () => {
+    while (warteschlange.length) {
+      const x = warteschlange.shift();
+      try {
+        const spur = await feineSpurHolen(x.id);
+        if (karteZustand.tourKarte !== karte) return;
+        const teile = spur ? spurTeile(spur.fein) : [];
+        if (teile.length) {
+          x.rand.setLatLngs(teile);
+          x.linie.setLatLngs(teile);
+        }
+      } catch (e) { /* grobe Spur bleibt */ }
+    }
+  };
+  [arbeiter(), arbeiter(), arbeiter()];
 }
 
 /** Hinweis in der Detailansicht: Etappe einer Tour oder „Zu Tour hinzufügen“. */

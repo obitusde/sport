@@ -1,6 +1,6 @@
 # PROJEKT.md – Sport-Tracker (Arbeitstitel „sport")
 
-Version: 0.14.0 (2026-11-18) – v0.14 Fotos aus dem Fotoschatz
+Version: 0.14.1 (2026-11-18) – v0.14 Fotos aus dem Fotoschatz
 
 Dieses Dokument ist die Grundlage für die Entwicklung mit Claude Code. Es beschreibt Ziele, Architektur, Arbeitsweise und Fahrplan. Claude Code liest es vor jeder Arbeit und hält es aktuell.
 
@@ -489,6 +489,7 @@ Für v0.5: nichts einzurichten. Optional `webAppTesten` ausführen: loggt, wie v
 
 | Version | Datum | Änderung |
 |---|---|---|
+| 0.14.1 | 2026-11-18 | Feedback: Foto-Marker auf der Karte als Vorschaubilder (36 px, Zahl bei mehreren) statt kleiner Punkte (`docs/fotos.js`, `docs/style.css`); Tour-Karte lädt die feinen Spuren (5 m) der Etappen nach, vorher grob und eckig (`docs/touren.js`, `docs/karte.js` mit `feineSpurHolen`). Die große Karte bleibt bei groben Spuren (alle Spuren auf einmal) |
 | 0.14.0 | 2026-11-18 | v0.14 Fotoschatz: `docs/fotos.js` (neu), `docs/touren.js`, `docs/karte.js` (Ebene „Fotos“), `docs/app.js` (Detail, Einstellungen, Betrachter), `docs/style.css`, `docs/hilfe.js`, `docs/sw.js`, `docs/index.html` 0.14.0; `android/` 0.14.0 (nur `/sport/` im WebView). Apps Script unverändert |
 | 0.13.0 | 2026-11-18 | v0.13: `docs/touren.js` 0.13.0 (neue Regeln: Übernachtung zu Hause beendet Tour, mindestens eine Übernachtung unterwegs, Lücke am Folgetag nur nach Übernachtung unterwegs, Entfernung ohne Lücken, Ferien-Standort; Orte unterwegs), `docs/daten/orte.txt` (neu, GeoNames), `docs/karte.js` 0.13.0 (Kartenwahl auf allen Karten, OSM außerhalb der Schweiz), `docs/app.js`, `docs/hilfe.js`, `docs/style.css`, `docs/sw.js`, `docs/index.html` 0.13.0. Apps Script und Android unverändert |
 | 0.12.0 | 2026-11-18 | v0.12 Mehrtagestouren: `docs/touren.js` (neu: Erkennung, Tour-Seite, Korrekturen), `gas/Touren.gs` (neu: Blatt „Touren“, Aktionen `touren`, `tourSetzen`), `gas/WebApp.gs` 0.12.0, `gas/Spuren.gs` 0.12.0 (Diagnose listet auch erfolgreiche Spuren). Oberfläche 0.12.0: `docs/app.js` (Unterseiten als Stapel, Tour-Hinweis in den Details, Touren in Erfolgen), `docs/historie.js` (Umschalter Aktivitäten/Touren), `docs/karte.js` (Filter „Nur Touren“, Tour im Popup, Spuren beim Start aus dem Zwischenspeicher), `docs/style.css`, `docs/hilfe.js`, `docs/sw.js`, `docs/index.html`. Android unverändert |

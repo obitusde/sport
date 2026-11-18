@@ -1,6 +1,6 @@
 /**
  * karte.js – Ansicht „Karte“ (Heatmap aller Spuren) und Spur in der Detailansicht
- * Version: 0.14.0 (2026-11-18)
+ * Version: 0.14.1 (2026-11-18)
  *
  * - Grundkarte: graue Landeskarte von swisstopo (WMTS, Web-Mercator), etwas blasser, damit
  *   die Spuren vorne stehen; umschaltbar auf die farbige Landeskarte oder OpenStreetMap.
@@ -29,6 +29,8 @@
  *   ganz in der Schweiz, beginnen Detail- und Tour-Karte mit OpenStreetMap (swisstopo zeigt
  *   außerhalb nichts).
  * - Ab 0.14.0: Ebene „Fotos“ (Fotoschatz, fotos.js) auf Detail- und Tour-Karte.
+ * - Ab 0.14.1: feineSpurHolen() für Detail- und Tour-Karte (die Tour-Karte zeigt zuerst die
+ *   groben und ersetzt sie durch die feinen Spuren).
  * - Die Spuren werden beim Öffnen der Karte neu geladen (zuerst aus dem Cache gezeigt).
  * Leaflet 1.9.4 wird erst beim ersten Öffnen einer Karte von cdnjs geladen (mit SRI-Prüfsumme).
  * Nutzt Funktionen und Konstanten aus app.js (wird vor app.js geladen, aber erst später aufgerufen).
@@ -648,18 +650,24 @@ function detailSpurHtml(a) {
     <p id="detail-karte-hinweis" class="leise klein-text detail-karte-hinweis"></p>`;
 }
 
+/** Feine Spur (5 m) einer Aktivität: {fein, entferntKm} oder null; einmal je Sitzung geladen. */
+async function feineSpurHolen(id) {
+  let spur = karteZustand.feineSpuren.get(id);
+  if (spur === undefined) {
+    const d = await api('spur', { id: id });
+    spur = d.fein ? { fein: d.fein, entferntKm: d.entferntKm } : null;
+    karteZustand.feineSpuren.set(id, spur);
+  }
+  return spur;
+}
+
 async function detailKarteNachZeichnen(id) {
   const flaeche = document.getElementById('detail-karte');
   if (!flaeche) return;
   vollbildAnwenden(flaeche, 'detail');
   try {
     await leafletLaden();
-    let spur = karteZustand.feineSpuren.get(id);
-    if (spur === undefined) {
-      const d = await api('spur', { id: id });
-      spur = d.fein ? { fein: d.fein, entferntKm: d.entferntKm } : null;
-      karteZustand.feineSpuren.set(id, spur);
-    }
+    const spur = await feineSpurHolen(id);
     if (!document.body.contains(flaeche)) return;
     if (!spur) {
       flaeche.innerHTML = '<p class="leer">Die Spur ist noch nicht geladen. Sie wird im Hintergrund nachgeholt.</p>';

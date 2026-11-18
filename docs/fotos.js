@@ -1,6 +1,6 @@
 /**
  * fotos.js – Fotos aus dem Fotoschatz in Touren und Aktivitäten
- * Version: 0.14.0 (2026-11-18)
+ * Version: 0.14.1 (2026-11-18)
  *
  * Der Fotoschatz (eigene App, obitusde/fotoschatz) legt Bilder und ein Inhaltsverzeichnis
  * index-<Schlüssel>.json in Cloudflare R2 ab. Jedes Foto hat Aufnahmezeit (t, lokal), Ordner
@@ -14,6 +14,8 @@
  * obitusde.github.io, Schlüssel „fotoschatz.links“), in der Android-App wird er eingefügt.
  * Das Verzeichnis (einige MB) liegt im Cache „sport-daten“ und wird höchstens einmal am Tag
  * neu geladen. Die öffentliche R2-Adresse ist kein Geheimnis (siehe Fotoschatz CLAUDE.md).
+ * Änderungen 0.14.1: Auf der Karte Vorschaubilder (36 px, weißer Rand, Zahl bei mehreren)
+ * statt kleiner Punkte – vorher kaum zu sehen und schwer anzutippen.
  * Link in den Fotoschatz: …/fotoschatz/?f=<Ordner>&b=<Bild-id>#<Link>. Ältere
  * Fotoschatz-Fassungen ignorieren ?f und ?b und öffnen die Ordnerliste.
  */
@@ -26,7 +28,7 @@ const FOTOS_SPEICHER = 'sport.fotoschatz';
 const FOTOS_STAND = 'sport.fotoschatz.stand';
 const FOTOS_CACHE_DATEI = 'fotoschatz-index.json';
 const FOTOS_ALTER_MS = 24 * 60 * 60 * 1000;
-const FOTO_PUNKT_RASTER = 44; // Pixel: Fotos näher beisammen werden ein Punkt mit Zahl
+const FOTO_PUNKT_RASTER = 64; // Pixel: Fotos näher beisammen werden ein Vorschaubild mit Zahl
 
 const fotosZustand = {
   fotos: null,        // [{t: Date, id, h, f, la, lo, de, ort}] nach Zeit sortiert
@@ -223,9 +225,14 @@ function fotoEbene(karte, fotos) {
       const la = liste.reduce((s, x) => s + x.p.la, 0) / liste.length;
       const lo = liste.reduce((s, x) => s + x.p.lo, 0) / liste.length;
       const n = liste.length;
+      const erstes = liste[0].p;
       L.marker([la, lo], {
-        icon: L.divIcon({ className: 'foto-punkt', html: `<span>${n > 1 ? n : ''}</span>`, iconSize: n > 1 ? [22, 22] : [12, 12] }),
-        keyboard: false, title: n > 1 ? n + ' Fotos' : 'Foto'
+        icon: L.divIcon({
+          className: 'foto-punkt',
+          html: `<span class="foto-vorschau" style="background-image:url('${esc(fotoThumb(erstes))}')"></span>${n > 1 ? `<b class="foto-zahl">${n}</b>` : ''}`,
+          iconSize: [36, 36]
+        }),
+        keyboard: false, riseOnHover: true, title: n > 1 ? n + ' Fotos' : 'Foto'
       }).on('click', () => fotoBetrachter(fotos, liste[0].i)).addTo(ebene);
     });
   };
