@@ -1,6 +1,6 @@
 /**
  * historie.js – Ansicht „Historie“: alle Aktivitäten durchsuchen und filtern
- * Version: 0.12.0 (2026-11-18)
+ * Version: 0.15.0 (2026-11-19)
  *
  * Suche (Name, Ort, Sportart, Jahr; Umlaute egal), Filter nach Sportart, Jahr, Ort und
  * Länge, Sortierung nach Datum, Distanz, Höhenmeter oder Dauer. Oben eine Summe der
@@ -9,6 +9,7 @@
  * Tippen auf einen Eintrag öffnet die Detailansicht; „Zurück“ führt hierher zurück.
  * Die Suche zeichnet nur die Trefferliste neu, damit die Tastatur offen bleibt.
  * Ab 0.12.0: Umschalter „Aktivitäten | Touren“; Touren (touren.js) mit Suche, Sportart und Jahr.
+ * Ab 0.15.0: dritter Reiter „Routen“ (gleiche Routen mit Rangliste, routen.js).
  * Nutzt Funktionen und Konstanten aus app.js (wird vor app.js geladen, aber erst später aufgerufen).
  */
 'use strict';
@@ -31,7 +32,7 @@ const HISTORIE_SORTIERUNG = [
 const HISTORIE_SEITE = 100;
 
 const historieZustand = {
-  modus: 'aktivitaeten', // oder 'touren'
+  modus: 'aktivitaeten', // oder 'touren', 'routen'
   suche: '',
   sportarten: new Set(), // leer = alle
   jahr: 'alle',
@@ -97,6 +98,7 @@ function historieEintrag(a, mitMonat) {
 function historieErgebnisHtml() {
   if (!zustand.aktivitaeten.length) return '<div class="karte leer">Noch keine Daten geladen.</div>';
   if (historieZustand.modus === 'touren') return tourenListeHtml(historieZustand);
+  if (historieZustand.modus === 'routen') return routenListeHtml(historieZustand);
   const liste = historieGefiltert();
   const zaehlende = liste.filter(zaehlt);
   const kmSumme = zaehlende.reduce((s, a) => s + (a.km || 0), 0);
@@ -134,15 +136,17 @@ function ansichtHistorie() {
   const vorhanden = new Set(zustand.aktivitaeten.map(a => a.sportart));
   const option = (wert, text, aktuell) => `<option value="${esc(wert)}" ${String(aktuell) === String(wert) ? 'selected' : ''}>${esc(text)}</option>`;
   const gefiltert = h.suche || h.sportarten.size || h.jahr !== 'alle' || h.ort !== 'alle' || h.laenge !== 'alle' || h.sortierung !== 'neu';
-  const touren = h.modus === 'touren';
+  const touren = h.modus !== 'aktivitaeten'; // Touren und Routen: weniger Filter
+  const sportFuerModus = h.modus === 'touren' ? TOUR_SPORTARTEN : h.modus === 'routen' ? ROUTE_SPORTARTEN : null;
+  const reiter = (modus, text) => `<button type="button" class="${h.modus === modus ? 'an' : ''}" data-hist-aktion="modus" data-modus="${modus}" aria-pressed="${h.modus === modus}">${text}</button>`;
+  const platzhalter = { aktivitaeten: 'Suchen: Name, Ort, Jahr …', touren: 'Tour suchen: Name, Ort, Jahr …', routen: 'Route suchen: Name, Ort …' };
   return `<h1>Historie</h1>
     <div class="umschalter" role="group" aria-label="Anzeigen">
-      <button type="button" class="${touren ? '' : 'an'}" data-hist-aktion="modus" data-modus="aktivitaeten" aria-pressed="${!touren}">Aktivitäten</button>
-      <button type="button" class="${touren ? 'an' : ''}" data-hist-aktion="modus" data-modus="touren" aria-pressed="${touren}">Touren</button>
+      ${reiter('aktivitaeten', 'Aktivitäten')}${reiter('touren', 'Touren')}${reiter('routen', 'Routen')}
     </div>
-    <input type="search" class="historie-suche" data-hist="suche" placeholder="${touren ? 'Tour suchen: Name, Ort, Jahr …' : 'Suchen: Name, Ort, Jahr …'}" value="${esc(h.suche)}" aria-label="Aktivitäten suchen" enterkeyhint="search">
+    <input type="search" class="historie-suche" data-hist="suche" placeholder="${platzhalter[h.modus]}" value="${esc(h.suche)}" aria-label="Suchen" enterkeyhint="search">
     <div class="filter-reihe">
-      ${SPORTARTEN.filter(s => vorhanden.has(s.key) && (!touren || TOUR_SPORTARTEN.indexOf(s.key) >= 0)).map(s => `<button type="button" class="chip ${h.sportarten.has(s.key) ? 'an' : ''}" style="--farbe: var(--${s.key})"
+      ${SPORTARTEN.filter(s => vorhanden.has(s.key) && (!sportFuerModus || sportFuerModus.indexOf(s.key) >= 0)).map(s => `<button type="button" class="chip ${h.sportarten.has(s.key) ? 'an' : ''}" style="--farbe: var(--${s.key})"
         data-hist-aktion="sport" data-sportart="${s.key}" aria-pressed="${h.sportarten.has(s.key)}">${s.name}</button>`).join('')}
     </div>
     <div class="historie-filter ${touren ? 'nur-jahr' : ''}">
@@ -195,7 +199,7 @@ document.addEventListener('click', ereignis => {
     case 'modus':
       historieZustand.modus = ziel.dataset.modus;
       historieZustand.anzahl = HISTORIE_SEITE;
-      if (historieZustand.modus === 'touren') spurenLaden(false);
+      if (historieZustand.modus !== 'aktivitaeten') spurenLaden(false);
       zeichnen();
       break;
     case 'mehr':

@@ -1,6 +1,6 @@
 /**
  * karte.js – Ansicht „Karte“ (Heatmap aller Spuren) und Spur in der Detailansicht
- * Version: 0.14.2 (2026-11-18)
+ * Version: 0.15.0 (2026-11-19)
  *
  * - Grundkarte: graue Landeskarte von swisstopo (WMTS, Web-Mercator), etwas blasser, damit
  *   die Spuren vorne stehen; umschaltbar auf die farbige Landeskarte oder OpenStreetMap.
@@ -32,6 +32,10 @@
  *   Knopf „Fotos an/aus“ statt in der Ebenen-Auswahl.
  * - Ab 0.14.1: feineSpurHolen() für Detail- und Tour-Karte (die Tour-Karte zeigt zuerst die
  *   groben und ersetzt sie durch die feinen Spuren).
+ * - Ab 0.15.0: Karte je Sportart auf Detail- und Tour-Karte. Rad: Ebene „Velorouten“ (Schweiz:
+ *   Veloland von swisstopo/ASTRA, sonst Waymarked Trails) bzw. außerhalb der Schweiz die Velokarte
+ *   CyclOSM; Wandern: Ebene „Wanderwege“ (Schweiz: swisstopo, sonst Waymarked Trails). Die Wahl
+ *   wird je Sportart und je „Schweiz / Ausland“ gespeichert. Neue Grundkarte „Velokarte“.
  * - Die Spuren werden beim Öffnen der Karte neu geladen (zuerst aus dem Cache gezeigt).
  * Leaflet 1.9.4 wird erst beim ersten Öffnen einer Karte von cdnjs geladen (mit SRI-Prüfsumme).
  * Nutzt Funktionen und Konstanten aus app.js (wird vor app.js geladen, aber erst später aufgerufen).
@@ -46,7 +50,16 @@ const KACHELN = {
   swisstopo: 'https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-farbe/default/current/3857/{z}/{x}/{y}.jpeg',
   swisstopoGrau: 'https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-grau/default/current/3857/{z}/{x}/{y}.jpeg',
   wanderwege: 'https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.swisstlm3d-wanderwege/default/current/3857/{z}/{x}/{y}.png',
-  osm: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+  velorouten: 'https://wmts.geo.admin.ch/1.0.0/ch.astra.veloland/default/current/3857/{z}/{x}/{y}.png',
+  wanderwegeWelt: 'https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png',
+  veloroutenWelt: 'https://tile.waymarkedtrails.org/cycling/{z}/{x}/{y}.png',
+  osm: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  velo: 'https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png'
+};
+/** Voreinstellung der Detail- und Tour-Karte je Sportart, in der Schweiz (ch) und sonst (welt). */
+const KARTE_JE_SPORTART = {
+  rad: { ch: { grund: 'grau', velorouten: true }, welt: { grund: 'velo' } },
+  wandern: { ch: { grund: 'grau', wanderwege: true }, welt: { grund: 'osm', wanderwege: true } }
 };
 const KARTE_SPORTARTEN = ['wandern', 'rad', 'ski', 'laufen'];
 /** Kräftigere Linienfarben als in der übrigen App, damit die Spuren auf der Karte auffallen. */
@@ -73,6 +86,7 @@ const karteZustand = {
   jahr: 'alle',
   grundkarte: (() => { try { return localStorage.getItem('sport.grundkarte') || 'grau'; } catch (e) { return 'grau'; } })(),
   wanderwege: false,
+  velorouten: false,
   sicht: null,        // {mitte, zoom} der letzten Ansicht
   spuren: null,       // [{id, sportart, jahr, datum, pfad, teile}]
   offen: null,        // Aktivitäten, deren Spur noch geladen oder neu berechnet wird
@@ -161,29 +175,67 @@ function inDerSchweiz(grenzen) {
     grenzen.getWest() >= 5.85 && grenzen.getEast() <= 10.6;
 }
 
+/** Gespeicherte Kartenwahl einer Sportart, sonst die Voreinstellung. */
+function karteWahl(sportart, schweiz) {
+  const bereich = schweiz ? 'ch' : 'welt';
+  const vor = (KARTE_JE_SPORTART[sportart] || {})[bereich] || { grund: schweiz ? karteZustand.grundkarte : 'osm' };
+  let gespeichert = null;
+  try { gespeichert = JSON.parse(localStorage.getItem('sport.karte.' + sportart + '.' + bereich) || 'null'); } catch (e) { /* egal */ }
+  return Object.assign({ grund: 'grau', wanderwege: false, velorouten: false }, vor, gespeichert || {});
+}
+
 /**
- * Grundkarten (grau, farbig, OSM) und Wanderwege mit Auswahl oben rechts. Die Wahl wird für
- * alle Karten gespeichert. deckkraft: wie stark die Landeskarte grau erscheint.
+ * Grundkarten (grau, farbig, OSM, Velokarte) und Ebenen Wanderwege und Velorouten mit Auswahl
+ * oben rechts. Ohne sportart (große Karte) gilt die gemeinsame Wahl, sonst die der Sportart
+ * (karteWahl). schweiz: false = Spur nicht ganz in der Schweiz (ohne Landeskarte, Ebenen von
+ * Waymarked Trails). deckkraft: wie stark die Landeskarte grau erscheint.
  */
-function kartenEbenen(karte, start, deckkraft) {
-  const grundkarten = {
-    grau: kachelEbene(KACHELN.swisstopoGrau, { opacity: deckkraft || 0.6, attribution: '© swisstopo' }),
-    farbe: kachelEbene(KACHELN.swisstopo, { opacity: 0.75, attribution: '© swisstopo' }),
-    osm: kachelEbene(KACHELN.osm, { maxNativeZoom: 19, opacity: 0.75, attribution: '© OpenStreetMap-Mitwirkende' })
+function kartenEbenen(karte, optionen) {
+  const { sportart, deckkraft } = optionen;
+  const schweiz = optionen.schweiz !== false;
+  const grundkarten = {};
+  if (schweiz) {
+    grundkarten.grau = kachelEbene(KACHELN.swisstopoGrau, { opacity: deckkraft || 0.6, attribution: '© swisstopo' });
+    grundkarten.farbe = kachelEbene(KACHELN.swisstopo, { opacity: 0.75, attribution: '© swisstopo' });
+  }
+  grundkarten.osm = kachelEbene(KACHELN.osm, { maxNativeZoom: 19, opacity: 0.75, attribution: '© OpenStreetMap-Mitwirkende' });
+  grundkarten.velo = kachelEbene(KACHELN.velo, { maxNativeZoom: 19, opacity: 0.8, subdomains: 'abc', attribution: 'CyclOSM · © OpenStreetMap-Mitwirkende' });
+  const namen = { grau: 'Landeskarte grau', farbe: 'Landeskarte farbig', osm: 'OpenStreetMap', velo: 'Velokarte' };
+  const welt = { maxNativeZoom: 17, opacity: 0.85, attribution: '© waymarkedtrails.org, OpenStreetMap-Mitwirkende' };
+  const zusatz = {
+    wanderwege: schweiz ? kachelEbene(KACHELN.wanderwege, { opacity: 0.9, attribution: 'Wanderwege © swisstopo' }) : kachelEbene(KACHELN.wanderwegeWelt, welt),
+    velorouten: schweiz ? kachelEbene(KACHELN.velorouten, { opacity: 0.9, attribution: 'Velorouten © swisstopo, ASTRA' }) : kachelEbene(KACHELN.veloroutenWelt, welt)
   };
-  const wanderwege = kachelEbene(KACHELN.wanderwege, { opacity: 0.9, attribution: 'Wanderwege © swisstopo' });
-  (grundkarten[start] || grundkarten.grau).addTo(karte);
-  if (karteZustand.wanderwege) wanderwege.addTo(karte);
-  const zusatz = { 'Wanderwege (Schweiz)': wanderwege };
-  L.control.layers({
-    'Landeskarte grau': grundkarten.grau, 'Landeskarte farbig': grundkarten.farbe, 'OpenStreetMap': grundkarten.osm
-  }, zusatz).addTo(karte);
+  const wahl = sportart ? karteWahl(sportart, schweiz)
+    : { grund: karteZustand.grundkarte, wanderwege: karteZustand.wanderwege, velorouten: karteZustand.velorouten };
+  (grundkarten[wahl.grund] || grundkarten.grau || grundkarten.osm).addTo(karte);
+  Object.keys(zusatz).forEach(k => { if (wahl[k]) zusatz[k].addTo(karte); });
+  const zusatzNamen = sportart ? { wanderwege: 'Wanderwege', velorouten: 'Velorouten' } : { wanderwege: 'Wanderwege (Schweiz)', velorouten: 'Velorouten (Schweiz)' };
+  L.control.layers(
+    Object.fromEntries(Object.keys(grundkarten).map(k => [namen[k], grundkarten[k]])),
+    Object.fromEntries(Object.keys(zusatz).map(k => [zusatzNamen[k], zusatz[k]]))
+  ).addTo(karte);
+  const merken = () => {
+    if (!sportart) {
+      try { localStorage.setItem('sport.grundkarte', karteZustand.grundkarte); } catch (err) { /* egal */ }
+      return;
+    }
+    try { localStorage.setItem('sport.karte.' + sportart + '.' + (schweiz ? 'ch' : 'welt'), JSON.stringify(wahl)); } catch (err) { /* egal */ }
+  };
   karte.on('baselayerchange', e => {
-    karteZustand.grundkarte = Object.keys(grundkarten).find(k => grundkarten[k] === e.layer) || 'grau';
-    try { localStorage.setItem('sport.grundkarte', karteZustand.grundkarte); } catch (err) { /* egal */ }
+    wahl.grund = Object.keys(grundkarten).find(k => grundkarten[k] === e.layer) || 'osm';
+    if (!sportart) karteZustand.grundkarte = wahl.grund;
+    merken();
   });
-  karte.on('overlayadd', e => { if (e.layer === wanderwege) karteZustand.wanderwege = true; });
-  karte.on('overlayremove', e => { if (e.layer === wanderwege) karteZustand.wanderwege = false; });
+  const ebeneSetzen = (e, an) => {
+    const k = Object.keys(zusatz).find(x => zusatz[x] === e.layer);
+    if (!k) return;
+    wahl[k] = an;
+    if (!sportart) karteZustand[k] = an;
+    merken();
+  };
+  karte.on('overlayadd', e => ebeneSetzen(e, true));
+  karte.on('overlayremove', e => ebeneSetzen(e, false));
 }
 
 // ---------------------------------------------------------------------------
@@ -478,7 +530,7 @@ async function karteNachZeichnen() {
   }
   const karte = L.map(flaeche, { preferCanvas: true, maxZoom: 19 }); // ganze Zoomstufen: keine hellen Kachelkanten
   karteZustand.karte = karte;
-  kartenEbenen(karte, karteZustand.grundkarte, 0.6);
+  kartenEbenen(karte, { deckkraft: 0.6 });
   vollbildKnopf('karte').addTo(karte);
 
   // Grenzen je Spur für Antippen und Zoom
@@ -680,7 +732,7 @@ async function detailKarteNachZeichnen(id) {
     if (!teile.length) return;
     const karte = L.map(flaeche, { scrollWheelZoom: false, maxZoom: 19 });
     karteZustand.detailKarte = karte;
-    kartenEbenen(karte, inDerSchweiz(L.latLngBounds([].concat(...teile))) ? karteZustand.grundkarte : 'osm', 0.7);
+    kartenEbenen(karte, { sportart: a.sportart || 'andere', schweiz: inDerSchweiz(L.latLngBounds([].concat(...teile))), deckkraft: 0.7 });
     vollbildKnopf('detail').addTo(karte);
     if (fotosZustand.fotos) fotoEbene(karte, aktivitaetFotos(a));
     L.polyline(teile, { color: '#fff', weight: 8, opacity: 0.95, lineCap: 'round', lineJoin: 'round' }).addTo(karte);

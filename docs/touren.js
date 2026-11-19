@@ -1,6 +1,6 @@
 /**
  * touren.js – Mehrtagestouren erkennen und anzeigen
- * Version: 0.14.2 (2026-11-18)
+ * Version: 0.15.0 (2026-11-19)
  *
  * Erkennung (entschieden mit Christof 2026-11-18), nur Wandern oder nur Rad pro Tour:
  * - Etappe = Aktivität von A nach B. Die nächste Etappe beginnt höchstens TOUR_ANSCHLUSS_KM
@@ -34,6 +34,17 @@
  *   Link in den Fotoschatz) und als abschaltbare Ebene „Fotos“ auf der Tour-Karte.
  * Änderungen 0.14.1: Die Tour-Karte lädt nach dem ersten Bild die feinen Spuren (5 m) der
  *   Etappen nach (vorher nur grob, 30 m, und dadurch eckig).
+ * Änderungen 0.15.0 (Feedback: Touren bearbeiten, erstellen, löschen; Wanderungen über 2–3 Tage):
+ * - Mindestentfernung je Sportart (TOUR_AUSDEHNUNG_KM): Wandern 10 km, Rad 20 km.
+ * - „Warum keine Tour?“: Für jede Wanderung und Radfahrt ohne Tour merkt sich die Erkennung den
+ *   Grund (z. B. „nächster Tag begann 4,2 km entfernt“). Steht in der Detailansicht, bleibt im Gerät.
+ * - Von Hand angelegte Touren (Korrektur „neu“): beginnen mit einer Aktivität, weitere kommen
+ *   mit „zu“ dazu. Auf der Tour-Seite stehen die Aktivitäten der Tage davor und danach zum Hinzufügen.
+ * - Bearbeiten: Name, Start und Ziel (Korrekturen „name“, „von“, „nach“).
+ * - „Keine Tour“ (Korrektur „aufgeloest“, Wert = alle Etappen) gilt für jede erkannte Tour, die
+ *   eine dieser Aktivitäten enthält. So kommt sie auch nach geänderten Regeln nicht wieder.
+ * - Fotos auf der Tour-Karte sehen anders aus als die Etappen-Nummern (fotos.js).
+ * - Karte je Sportart (karte.js): Rad mit Velorouten, Wandern mit Wanderwegen.
  * Nutzt Funktionen und Konstanten aus app.js und karte.js.
  */
 'use strict';
@@ -43,7 +54,10 @@ const TOUR_ANSCHLUSS_KM = 3;
 const TOUR_PAUSE_TAGE = 2;
 const TOUR_SPRUNG_KM = 200;
 const TOUR_RUNDE_KM = 1.5;
-const TOUR_AUSDEHNUNG_KM = 20;
+/** Mindestentfernung vom Start, die ein zusammenhängendes Stück der Tour schaffen muss. */
+const TOUR_AUSDEHNUNG_KM = { wandern: 10, rad: 20 };
+/** Aktivitäten so viele Tage vor und nach einer Tour werden zum Hinzufügen angeboten. */
+const TOUR_UMFELD_TAGE = 3;
 const HAEUFIG_ZELLE_KM = 0.5;
 const HAEUFIG_MIN = 15;
 const STANDORT_NAECHTE = 3;  // so viele Nächte am selben Ort = Ferien-Standort
@@ -55,7 +69,8 @@ const TAG_FARBEN = ['#d63c12', '#1650c7', '#0f7a33', '#8a2fc4', '#c27c00', '#0a8
 const tourenZustand = {
   korrekturen: [],    // [[art, schluessel, wert], …] aus der Web-App
   cache: null,        // {schluessel, ergebnis}
-  speichert: false
+  speichert: false,
+  bearbeiten: null    // Schlüssel der Tour, deren Felder offen sind
 };
 
 function abstandKm(p, q) {
@@ -71,12 +86,14 @@ function tagNummer(d) {
 }
 
 function korrekturenAuswerten() {
-  const k = { name: new Map(), aufgeloest: new Set(), ohne: new Set(), zu: new Map() };
+  const k = { name: new Map(), aufgeloest: new Map(), ohne: new Set(), zu: new Map(), von: new Map(), nach: new Map(), neu: new Set(), routenname: new Map() };
   tourenZustand.korrekturen.forEach(([art, schluessel, wert]) => {
-    if (art === 'name') k.name.set(schluessel, wert);
-    else if (art === 'aufgeloest') k.aufgeloest.add(schluessel);
-    else if (art === 'ohne') k.ohne.add(schluessel);
-    else if (art === 'zu') k.zu.set(schluessel, wert);
+    if (art === 'ohne' || art === 'neu') k[art].add(schluessel);
+    else if (art === 'aufgeloest') {
+      // „keine Tour“: Schlüssel und alle Etappen (activityId → Schlüssel der Korrektur)
+      k.aufgeloest.set(schluessel, schluessel);
+      String(wert).split(',').forEach(id => { if (id && id !== '1' && !k.aufgeloest.has(id)) k.aufgeloest.set(id, schluessel); });
+    } else if (k[art] instanceof Map) k[art].set(schluessel, wert);
   });
   return k;
 }
@@ -98,12 +115,18 @@ function tourenErgebnis() {
 function tourenErkennen() {
   const spurProId = new Map(karteZustand.spuren.map(s => [s.id, s]));
   const k = korrekturenAuswerten();
+  // activityId → {zeilen: [Text, …], aufgeloest: Schlüssel}: warum die Aktivität zu keiner Tour gehört
+  const grund = new Map();
+  const grundSetzen = (id, zeilen, aufgeloest) => grund.set(id, { zeilen, aufgeloest: aufgeloest || null });
 
   // Start und Ende jeder Aktivität mit Spur
   const alle = [];
   zustand.aktivitaeten.forEach(a => {
     const s = spurProId.get(a.id);
-    if (!s) return;
+    if (!s) {
+      if (TOUR_SPORTARTEN.indexOf(a.sportart) >= 0) grundSetzen(a.id, [a.gps ? 'Die Spur ist noch nicht geladen.' : 'Die Aktivität hat keine GPS-Spur.']);
+      return;
+    }
     if (!s.teile) s.teile = spurTeile(s.pfad);
     if (!s.teile.length) return;
     const letzte = s.teile[s.teile.length - 1];
@@ -126,18 +149,39 @@ function tourenErkennen() {
     return summe >= HAEUFIG_MIN;
   };
 
+  /** Text, warum x nicht an die Kette anschließt. */
+  const bruchText = (kette, x, d, pause, zuHause) => {
+    const davor = kette.teile[kette.teile.length - 1].x.a;
+    const wer = 'Die Aktivität am ' + kurzDatum(x.a.datum) + ' ';
+    const vorher = 'Ende am ' + kurzDatum(davor.datum);
+    if (pause > TOUR_PAUSE_TAGE + 1) return 'Zwischen ' + kurzDatum(davor.datum) + ' und ' + kurzDatum(x.a.datum) + ' liegen ' + (pause - 1) + ' Tage ohne ' + (kette.sportart === 'rad' ? 'Radfahrt' : 'Wanderung') + ' (erlaubt: ' + TOUR_PAUSE_TAGE + ').';
+    if (pause >= 1 && zuHause) return 'Nach dem ' + kurzDatum(davor.datum) + ' war die Übernachtung an einem Ort, an dem du oft bist (z. B. Zuhause). Das beendet eine Tour.';
+    if (d > TOUR_SPRUNG_KM) return wer + 'begann ' + km(d) + ' vom ' + vorher + ' entfernt (mehr als ' + TOUR_SPRUNG_KM + ' km).';
+    return wer + 'begann ' + km(d) + ' vom ' + vorher + ' entfernt. Erlaubt sind ' + TOUR_ANSCHLUSS_KM +
+      ' km; mehr (z. B. Zug) nur am selben Tag oder nach einer ersten Übernachtung unterwegs.';
+  };
+
   // Ketten je Sportart
   const ketten = [];
   TOUR_SPORTARTEN.forEach(sportart => {
-    const liste = alle.filter(x => x.a.sportart === sportart && zaehlt(x.a) && !k.ohne.has(x.a.id) &&
-      !(!x.runde && haeufig(x.start) && haeufig(x.ende))).sort((x, y) => x.a.datum - y.a.datum);
+    const liste = [];
+    alle.forEach(x => {
+      if (x.a.sportart !== sportart) return;
+      if (!zaehlt(x.a)) grundSetzen(x.a.id, ['Die Aktivität ist unrealistisch und zählt nicht.']);
+      else if (k.ohne.has(x.a.id)) grundSetzen(x.a.id, ['Du hast sie aus einer Tour genommen.']);
+      else if (!x.runde && haeufig(x.start) && haeufig(x.ende)) grundSetzen(x.a.id, ['Start und Ziel liegen an Orten, an denen du oft bist (z. B. Zuhause, Arbeit). Das gilt als Pendeln.']);
+      else liste.push(x);
+    });
+    liste.sort((x, y) => x.a.datum - y.a.datum);
     let kette = null;
-    const neueKette = x => ({ sportart, teile: [{ x, art: 'etappe' }], punkt: x.ende, letzterTag: x.tag, anschluesse: 0, naechte: [] });
+    const neueKette = x => ({ sportart, teile: [{ x, art: 'etappe' }], punkt: x.ende, letzterTag: x.tag, anschluesse: 0, naechte: [], bruchDavor: x.bruch || null, bruchDanach: null });
     liste.forEach(x => {
       if (x.runde) {
         if (kette && x.tag - kette.letzterTag <= TOUR_PAUSE_TAGE + 1 && abstandKm(kette.punkt, x.start) <= TOUR_ANSCHLUSS_KM) {
           kette.teile.push({ x, art: 'ausflug' });
           kette.letzterTag = x.tag;
+        } else {
+          grundSetzen(x.a.id, ['Rundtour (Start und Ziel am selben Ort), die nicht dort beginnt, wo am Tag davor eine Etappe endete.']);
         }
         return;
       }
@@ -163,6 +207,8 @@ function tourenErkennen() {
           kette.letzterTag = x.tag;
           return;
         }
+        x.bruch = bruchText(kette, x, d, pause, zuHause);
+        kette.bruchDanach = x.bruch;
         ketten.push(kette);
       }
       kette = neueKette(x);
@@ -170,14 +216,25 @@ function tourenErkennen() {
     if (kette) ketten.push(kette);
   });
 
-  // Gültige Ketten werden Touren
-  const touren = [];
+  // Gültige Ketten werden Touren, sonst Grund merken
+  let touren = [];
   ketten.forEach(kt => {
     const etappen = kt.teile.filter(t => t.art === 'etappe');
-    if (etappen.length < 2 || kt.anschluesse < 1 || !kt.naechte.length) return;
-    if (new Set(etappen.map(t => t.x.tag)).size < 2) return;
+    const ablehnen = text => {
+      const zeilen = [text];
+      if (etappen.length < 2) {
+        if (kt.bruchDavor) zeilen.push(kt.bruchDavor);
+        if (kt.bruchDanach) zeilen.push(kt.bruchDanach);
+      }
+      kt.teile.forEach(t => grundSetzen(t.x.a.id, zeilen));
+    };
+    if (etappen.length < 2) return ablehnen('Keine Etappe am selben oder an einem der nächsten Tage schließt an.');
+    if (kt.anschluesse < 1) return ablehnen('Keine Etappe beginnt nahe am Ende der vorherigen (nur Lücken).');
+    if (!kt.naechte.length || new Set(etappen.map(t => t.x.tag)).size < 2) return ablehnen('Alle Etappen sind am selben Tag, es gibt keine Übernachtung unterwegs.');
     // Ferien-Standort: mehr als zwei Nächte am selben Ort
-    if (kt.naechte.some(p => kt.naechte.filter(q => abstandKm(p, q) <= TOUR_ANSCHLUSS_KM).length >= STANDORT_NAECHTE)) return;
+    if (kt.naechte.some(p => kt.naechte.filter(q => abstandKm(p, q) <= TOUR_ANSCHLUSS_KM).length >= STANDORT_NAECHTE)) {
+      return ablehnen('Mindestens ' + STANDORT_NAECHTE + ' Nächte am selben Ort: Das gilt als Ferien-Standort mit Tagesausflügen.');
+    }
     // Mindestentfernung innerhalb eines zusammenhängend gefahrenen Stücks (ohne Lücken)
     let weite = 0;
     let anfang = null;
@@ -185,29 +242,54 @@ function tourenErkennen() {
       if (!anfang || t.sprung) anfang = t.x.start;
       weite = Math.max(weite, abstandKm(anfang, t.x.start), abstandKm(anfang, t.x.ende));
     });
-    if (weite < TOUR_AUSDEHNUNG_KM) return;
+    const noetig = TOUR_AUSDEHNUNG_KM[kt.sportart] || 20;
+    if (weite < noetig) return ablehnen('Die Etappen kommen am Stück nur ' + km(weite) + ' vom Start weg (nötig: ' + noetig + ' km Luftlinie).');
     touren.push({ schluessel: etappen[0].x.a.id, sportart: kt.sportart, teile: kt.teile.slice() });
+  });
+
+  // „Keine Tour“: gilt für jede erkannte Tour, die eine so markierte Aktivität enthält
+  touren = touren.filter(t => {
+    const id = t.teile.map(tt => tt.x.a.id).find(x => k.aufgeloest.has(x));
+    if (!id) return true;
+    const aus = k.aufgeloest.get(id);
+    t.teile.forEach(tt => grundSetzen(tt.x.a.id, ['Du hast diese Tour als „keine Tour“ markiert.'], aus));
+    return false;
+  });
+
+  const proX = new Map(alle.map(x => [x.a.id, x]));
+  const xFuer = id => proX.get(id) || (() => {
+    const a = zustand.aktivitaeten.find(y => y.id === id);
+    return a ? { a, start: null, ende: null, tag: tagNummer(a.datum), runde: false } : null;
+  })();
+  const herausnehmen = id => {
+    touren.forEach(t => { t.teile = t.teile.filter(tt => tt.x.a.id !== id); });
+  };
+
+  // Von Hand angelegte Touren (ersetzen eine erkannte Tour mit demselben Schlüssel)
+  k.neu.forEach(id => {
+    const x = xFuer(id);
+    if (!x) return;
+    touren = touren.filter(t => t.schluessel !== id);
+    herausnehmen(id);
+    touren.push({ schluessel: id, sportart: x.a.sportart, vonHand: true, teile: [{ x, art: 'etappe', manuell: true }] });
   });
 
   // Von Hand hinzugefügte Aktivitäten
   const proSchluessel = new Map(touren.map(t => [t.schluessel, t]));
-  const proX = new Map(alle.map(x => [x.a.id, x]));
   k.zu.forEach((tourSchluessel, id) => {
     const ziel = proSchluessel.get(tourSchluessel);
-    const x = proX.get(id) || (() => {
-      const a = zustand.aktivitaeten.find(y => y.id === id);
-      return a ? { a, start: null, ende: null, tag: tagNummer(a.datum), runde: false } : null;
-    })();
-    if (!ziel || !x) return;
-    touren.forEach(t => { t.teile = t.teile.filter(tt => tt.x.a.id !== id); });
-    ziel.teile.push({ x, art: x.runde ? 'ausflug' : 'etappe', manuell: true });
+    const x = xFuer(id);
+    if (!ziel || !x || id === tourSchluessel) return;
+    herausnehmen(id);
+    ziel.teile.push({ x, art: x.runde && !ziel.vonHand ? 'ausflug' : 'etappe', manuell: true });
   });
+  touren = touren.filter(t => t.teile.length);
 
   // Zusammenfassen, Lücken, Namen
   const proAktivitaet = new Map();
   const ergebnis = [];
+  const spurProIdOrte = orteDaten.liste ? spurProId : null;
   touren.forEach(t => {
-    if (k.aufgeloest.has(t.schluessel)) return;
     t.teile.sort((x, y) => x.x.a.datum - y.x.a.datum);
     let vorher = null;
     let nr = 0;
@@ -229,7 +311,6 @@ function tourenErkennen() {
     const bisTag = t.teile[t.teile.length - 1].x.tag;
     const letzteEtappe = etappen.length ? etappen[etappen.length - 1].x.a : letzte;
     // Orte unterwegs (nur wenn die Ortsliste geladen ist)
-    const spurProIdOrte = orteDaten.liste ? new Map(karteZustand.spuren.map(sp => [sp.id, sp])) : null;
     let ueber = [];
     if (spurProIdOrte) {
       t.teile.forEach(tt => {
@@ -238,15 +319,17 @@ function tourenErkennen() {
       });
       ueber = tourUeber(t.teile);
     }
-    const startOrt = etappen.length && etappen[0].orte && etappen[0].orte.start;
-    const zielOrt = etappen.length && etappen[etappen.length - 1].orte && etappen[etappen.length - 1].orte.ziel;
-    const autoName = startOrt && zielOrt && startOrt !== zielOrt ? startOrt + ' → ' + zielOrt
-      : erste.ort && letzteEtappe.ort && erste.ort !== letzteEtappe.ort ? erste.ort + ' → ' + letzteEtappe.ort
-        : (t.sportart === 'rad' ? 'Radtour ' : 'Wandertour ') + MONATE[erste.datum.getMonth()] + ' ' + erste.datum.getFullYear();
+    const startAuto = (etappen.length && etappen[0].orte && etappen[0].orte.start) || erste.ort || '';
+    const zielAuto = (etappen.length && etappen[etappen.length - 1].orte && etappen[etappen.length - 1].orte.ziel) || letzteEtappe.ort || '';
+    const start = k.von.get(t.schluessel) || startAuto;
+    const ziel = k.nach.get(t.schluessel) || zielAuto;
+    const autoName = start && ziel && start !== ziel ? start + ' → ' + ziel
+      : (t.sportart === 'rad' ? 'Radtour ' : 'Wandertour ') + (start ? 'ab ' + start + ' ' : '') + MONATE[erste.datum.getMonth()] + ' ' + erste.datum.getFullYear();
     const tour = Object.assign(t, {
       name: k.name.get(t.schluessel) || autoName,
       autoName,
-      ueber,
+      start, ziel, startAuto, zielAuto,
+      ueber: ueber.filter(o => o !== start && o !== ziel),
       von: erste.datum,
       bis: letzte.datum,
       tage: bisTag - vonTag + 1,
@@ -261,11 +344,19 @@ function tourenErkennen() {
       hmAb: aktivitaeten.reduce((s, a) => s + (a.hmAb || 0), 0),
       min: aktivitaeten.reduce((s, a) => s + (a.min || 0), 0)
     });
-    t.teile.forEach(tt => proAktivitaet.set(tt.x.a.id, { tour, nr: tt.nr || null, art: tt.art, manuell: !!tt.manuell }));
+    t.teile.forEach(tt => {
+      proAktivitaet.set(tt.x.a.id, { tour, nr: tt.nr || null, art: tt.art, manuell: !!tt.manuell });
+      grund.delete(tt.x.a.id);
+    });
     ergebnis.push(tour);
   });
   ergebnis.sort((x, y) => y.von - x.von);
-  return { touren: ergebnis, proAktivitaet };
+  return { touren: ergebnis, proAktivitaet, grund };
+}
+
+/** „Mo 3. Juni“ */
+function kurzDatum(d) {
+  return TAGE_KURZ[(d.getDay() + 6) % 7] + ' ' + d.getDate() + '. ' + MONATE[d.getMonth()];
 }
 
 // ---------------------------------------------------------------------------
@@ -387,19 +478,29 @@ function tourFinden(schluessel) {
 // ---------------------------------------------------------------------------
 
 async function tourKorrektur(art, schluessel, wert, text) {
-  if (tourenZustand.speichert) return;
+  return tourKorrekturen([[art, schluessel, wert]], text);
+}
+
+/** Speichert mehrere Korrekturen nacheinander: [[art, schluessel, wert], …]. Liefert true bei Erfolg. */
+async function tourKorrekturen(liste, text) {
+  if (tourenZustand.speichert) return false;
   tourenZustand.speichert = true;
+  let ok = false;
   try {
-    const antwort = await api('tourSetzen', { art, schluessel, wert: wert || '' });
-    tourenZustand.korrekturen = antwort.korrekturen || [];
-    schreiben(SPEICHER.touren, tourenZustand.korrekturen);
-    meldung(text);
+    for (const [art, schluessel, wert] of liste) {
+      const antwort = await api('tourSetzen', { art, schluessel, wert: wert || '' });
+      tourenZustand.korrekturen = antwort.korrekturen || [];
+      schreiben(SPEICHER.touren, tourenZustand.korrekturen);
+    }
+    ok = true;
+    if (text) meldung(text);
   } catch (e) {
-    meldung('Nicht gespeichert: ' + (e.message.indexOf('unbekannte aktion') >= 0 ? 'Die Web-App ist noch nicht aktualisiert.' : e.message));
+    meldung('Nicht gespeichert: ' + (/unbekannte (aktion|korrektur)/.test(e.message) ? 'Die Web-App ist noch nicht aktualisiert.' : e.message));
   } finally {
     tourenZustand.speichert = false;
     zeichnen();
   }
+  return ok;
 }
 
 // ---------------------------------------------------------------------------
@@ -483,12 +584,12 @@ function ansichtTour() {
     return zurueck + '<div class="karte leer">Lade Spuren …</div>';
   }
   const t = tourFinden(zustand.tourSchluessel);
-  if (!t) return zurueck + '<div class="karte leer">Diese Tour gibt es nicht mehr (aufgelöst oder geändert).</div>';
+  if (!t) return zurueck + '<div class="karte leer">Diese Tour gibt es nicht mehr (gelöscht oder geändert).</div>';
 
   let html = zurueck + `<header class="detail-kopf" style="--farbe: var(--${t.sportart})">
     <span class="detail-marke" aria-hidden="true"></span>
     <div><h1>${esc(t.name)}</h1>
-    <span class="leise">${t.sportart === 'rad' ? 'Radtour' : 'Wandertour'} · ${esc(zeitraumText(t.von, t.bis))}</span>
+    <span class="leise">${t.sportart === 'rad' ? 'Radtour' : 'Wandertour'} · ${esc(zeitraumText(t.von, t.bis))}${t.vonHand ? ' · von Hand angelegt' : ''}</span>
     ${t.ueber && t.ueber.length ? `<span class="leise tour-ueber">über ${esc(t.ueber.join(', '))}</span>` : ''}</div>
   </header>`;
   html += `<section class="karte karte-detail-rahmen"><div id="tour-karte" class="detail-karte" role="region" aria-label="Karte der Tour"></div></section>`;
@@ -532,16 +633,67 @@ function ansichtTour() {
         </span>
         <svg class="eintrag-pfeil" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
       </button>
-      <button type="button" class="rund klein-rund tour-entfernen" data-tour-aktion="entfernen" data-id="${esc(a.id)}" aria-label="Aus der Tour entfernen" title="Aus der Tour entfernen">×</button>
+      ${t.vonHand && a.id === t.schluessel ? '' : `<button type="button" class="rund klein-rund tour-entfernen" data-tour-aktion="entfernen" data-id="${esc(a.id)}" aria-label="Aus der Tour entfernen" title="Aus der Tour entfernen">×</button>`}
     </div>`;
   });
   html += '</div>';
-  html += `<div class="knopfreihe" style="margin-top:12px">
-      <button class="knopf" data-tour-aktion="umbenennen">Umbenennen</button>
-      <button class="knopf" data-tour-aktion="aufloesen">Tour auflösen</button>
-    </div>
-    <p class="leise klein-text">„×“ nimmt eine Aktivität aus der Tour. Fehlt eine, öffne sie und tippe auf „Zu Tour hinzufügen“.</p>`;
+  html += tourUmfeldHtml(t, e);
+  html += tourBearbeitenHtml(t);
   return html;
+}
+
+/** Aktivitäten derselben Sportart kurz vor, während und nach der Tour, die nicht dazugehören. */
+function tourUmfeldHtml(t, e) {
+  const von = tagePlus(new Date(t.von.getFullYear(), t.von.getMonth(), t.von.getDate()), -TOUR_UMFELD_TAGE);
+  const bis = tagePlus(new Date(t.bis.getFullYear(), t.bis.getMonth(), t.bis.getDate()), TOUR_UMFELD_TAGE + 1);
+  const drin = new Set(t.teile.map(tt => tt.x.a.id));
+  const liste = zustand.aktivitaeten.filter(a => a.sportart === t.sportart && a.datum >= von && a.datum < bis && !drin.has(a.id))
+    .sort((x, y) => x.datum - y.datum);
+  if (!liste.length) return '';
+  return `<h2>Hinzufügen</h2>
+    <p class="leise klein-text" style="margin-top:0">${SPORT_NAME[t.sportart]} vom ${kurzDatum(von)} bis ${kurzDatum(tagePlus(bis, -1))}, die nicht zur Tour gehören.</p>
+    <div class="liste">${liste.map(a => {
+      const p = e.proAktivitaet.get(a.id);
+      const werte = [kurzDatum(a.datum) + ' ' + uhrzeit(a.datum)];
+      if (a.km) werte.push(km(a.km));
+      if (p) werte.push('gehört zu „' + p.tour.name + '“');
+      return `<div class="tour-zeile">
+        <button type="button" class="eintrag" data-aktion="detail" data-id="${esc(a.id)}" style="--farbe: var(--${t.sportart})">
+          <span class="eintrag-marke" aria-hidden="true"></span>
+          <span class="eintrag-text">
+            <span class="eintrag-name">${esc(a.name || SPORT_NAME[a.sportart])}</span>
+            <span class="eintrag-werte">${esc(werte.join(' · '))}</span>
+          </span>
+        </button>
+        <button type="button" class="rund klein-rund tour-plus" data-tour-aktion="hinzufuegen" data-id="${esc(a.id)}" data-tour="${esc(t.schluessel)}" aria-label="Zur Tour hinzufügen" title="Zur Tour hinzufügen">+</button>
+      </div>`;
+    }).join('')}</div>`;
+}
+
+/** Knöpfe unter der Tour; „Bearbeiten“ öffnet Felder für Name, Start und Ziel. */
+function tourBearbeitenHtml(t) {
+  const feld = (name, wert, platzhalter, text) => `<label class="tour-feld"><span>${text}</span>
+    <input type="text" name="${name}" value="${esc(wert)}" placeholder="${esc(platzhalter)}" maxlength="100" autocomplete="off"></label>`;
+  if (tourenZustand.bearbeiten === t.schluessel) {
+    const k = korrekturenAuswerten();
+    return `<form class="karte tour-bearbeiten" data-tour-form="${esc(t.schluessel)}">
+      ${feld('name', k.name.get(t.schluessel) || '', t.autoName, 'Name')}
+      ${feld('von', k.von.get(t.schluessel) || '', t.startAuto || 'Startort', 'Start')}
+      ${feld('nach', k.nach.get(t.schluessel) || '', t.zielAuto || 'Zielort', 'Ziel')}
+      <p class="leise klein-text">Leer lassen = automatisch (grau). Ohne eigenen Namen heißt die Tour „Start → Ziel“.</p>
+      <div class="knopfreihe">
+        <button type="submit" class="knopf haupt">Speichern</button>
+        <button type="button" class="knopf" data-tour-aktion="abbrechen">Abbrechen</button>
+      </div>
+    </form>`;
+  }
+  return `<div class="knopfreihe" style="margin-top:12px">
+      <button class="knopf" data-tour-aktion="bearbeiten">Bearbeiten</button>
+      <button class="knopf" data-tour-aktion="${t.vonHand ? 'loeschen' : 'aufloesen'}">${t.vonHand ? 'Tour löschen' : 'Keine Tour'}</button>
+    </div>
+    <p class="leise klein-text">„×“ nimmt eine Aktivität aus der Tour, „+“ fügt eine hinzu. ${t.vonHand
+      ? 'Diese Tour hast du von Hand angelegt. „Tour löschen“ entfernt sie, die Aktivitäten bleiben.'
+      : '„Keine Tour“ entfernt die Tour und merkt sich das, damit sie nicht wieder vorgeschlagen wird. Die Aktivitäten bleiben.'}</p>`;
 }
 
 async function tourKarteNachZeichnen() {
@@ -566,7 +718,7 @@ async function tourKarteNachZeichnen() {
     const s = spurProId.get(tt.x.a.id);
     if (s && s.teile) s.teile.forEach(teil => alleGrenzen.extend(L.latLngBounds(teil)));
   });
-  kartenEbenen(karte, inDerSchweiz(alleGrenzen) ? karteZustand.grundkarte : 'osm', 0.7);
+  kartenEbenen(karte, { sportart: t.sportart, schweiz: inDerSchweiz(alleGrenzen), deckkraft: 0.7 });
   vollbildKnopf('tour').addTo(karte);
   if (fotosZustand.fotos) fotoEbene(karte, tourFotos(t));
   const grenzen = L.latLngBounds([]);
@@ -617,7 +769,10 @@ async function tourKarteNachZeichnen() {
   [arbeiter(), arbeiter(), arbeiter()];
 }
 
-/** Hinweis in der Detailansicht: Etappe einer Tour oder „Zu Tour hinzufügen“. */
+/**
+ * Hinweis in der Detailansicht: Etappe einer Tour, sonst zugeklappt „Mehrtagestour?“ mit dem Grund,
+ * warum die Aktivität zu keiner Tour gehört, „Neue Tour“ und „Zu Tour hinzufügen“.
+ */
 function tourHinweisHtml(a) {
   if (TOUR_SPORTARTEN.indexOf(a.sportart) < 0) return '';
   const e = tourenErgebnis();
@@ -630,13 +785,21 @@ function tourHinweisHtml(a) {
       <small>${esc(zeitraumText(p.tour.von, p.tour.bis))} · ${km(p.tour.km)}</small>
     </button>`;
   }
+  const g = e.grund.get(a.id);
   const nah = e.touren.filter(t => t.sportart === a.sportart &&
     a.datum >= tagePlus(t.von, -14) && a.datum <= tagePlus(t.bis, 15));
-  if (!nah.length) return '';
-  return `<div class="tour-hinzu">
-    <select data-tour-auswahl aria-label="Tour wählen">${nah.map(t => `<option value="${esc(t.schluessel)}">${esc(t.name)} (${esc(zeitraumText(t.von, t.bis))})</option>`).join('')}</select>
-    <button class="knopf klein" data-tour-aktion="hinzufuegen" data-id="${esc(a.id)}">Zu Tour hinzufügen</button>
-  </div>`;
+  return `<details class="tour-warum">
+    <summary>Mehrtagestour?</summary>
+    <p><b>Gehört zu keiner Tour.</b> ${g ? g.zeilen.map(esc).join(' ') : 'Kein Grund bekannt.'}</p>
+    <div class="knopfreihe">
+      ${g && g.aufgeloest ? `<button class="knopf klein" data-tour-aktion="wieder" data-tour="${esc(g.aufgeloest)}">Doch als Tour zeigen</button>` : ''}
+      <button class="knopf klein" data-tour-aktion="neu" data-id="${esc(a.id)}">Neue Tour mit dieser ${a.sportart === 'rad' ? 'Radfahrt' : 'Wanderung'}</button>
+    </div>
+    ${nah.length ? `<div class="tour-hinzu">
+      <select data-tour-auswahl aria-label="Tour wählen">${nah.map(t => `<option value="${esc(t.schluessel)}">${esc(t.name)} (${esc(zeitraumText(t.von, t.bis))})</option>`).join('')}</select>
+      <button class="knopf klein" data-tour-aktion="hinzufuegen" data-id="${esc(a.id)}">Zu Tour hinzufügen</button>
+    </div>` : ''}
+  </details>`;
 }
 
 /** Popup der Karte: Zeile „Etappe 3/9 · Tourname“. */
@@ -658,6 +821,15 @@ function tourenErfolgeHtml() {
   return html;
 }
 
+/** Fügt eine Aktivität zu einer Tour hinzu (hebt „ohne“ vorher auf). */
+function tourHinzufuegen(id, tourSchluessel) {
+  const k = korrekturenAuswerten();
+  const liste = [];
+  if (k.ohne.has(id)) liste.push(['ohne', id, '']);
+  liste.push(['zu', id, tourSchluessel]);
+  return tourKorrekturen(liste, 'Zur Tour hinzugefügt.');
+}
+
 document.addEventListener('click', ereignis => {
   const ziel = ereignis.target.closest('[data-tour-aktion]');
   if (!ziel) return;
@@ -666,17 +838,42 @@ document.addEventListener('click', ereignis => {
     case 'oeffnen':
       tourOeffnen(ziel.dataset.tour);
       break;
-    case 'umbenennen': {
+    case 'bearbeiten':
       if (!t) return;
-      const neu = prompt('Name der Tour (leer = automatischer Name):', t.name === t.autoName ? '' : t.name);
-      if (neu === null) return;
-      tourKorrektur('name', t.schluessel, neu.trim(), neu.trim() ? 'Name gespeichert.' : 'Automatischer Name.');
+      tourenZustand.bearbeiten = t.schluessel;
+      zeichnen();
+      break;
+    case 'abbrechen':
+      tourenZustand.bearbeiten = null;
+      zeichnen();
+      break;
+    case 'aufloesen':
+      if (!t || !confirm('„' + t.name + '“ ist keine Tour? Sie wird entfernt und nicht wieder vorgeschlagen. Die Aktivitäten bleiben.')) return;
+      // Alle erkannten Etappen merken, damit die Tour auch mit geänderten Regeln nicht wiederkommt
+      tourKorrektur('aufgeloest', t.schluessel, t.teile.filter(tt => !tt.manuell).map(tt => tt.x.a.id).join(',') || '1', 'Gemerkt: keine Tour.');
+      break;
+    case 'wieder':
+      tourKorrektur('aufgeloest', ziel.dataset.tour, '', 'Wird wieder als Tour gezeigt.');
+      break;
+    case 'loeschen': {
+      if (!t || !confirm('Tour „' + t.name + '“ löschen? Die Aktivitäten bleiben.')) return;
+      const k = korrekturenAuswerten();
+      const liste = [['neu', t.schluessel, '']];
+      k.zu.forEach((tour, id) => { if (tour === t.schluessel) liste.push(['zu', id, '']); });
+      ['name', 'von', 'nach'].forEach(art => { if (k[art].has(t.schluessel)) liste.push([art, t.schluessel, '']); });
+      tourKorrekturen(liste, 'Tour gelöscht.');
       break;
     }
-    case 'aufloesen':
-      if (!t || !confirm('Tour „' + t.name + '“ auflösen? Die Aktivitäten bleiben, sie gehören dann nur zu keiner Tour mehr.')) return;
-      tourKorrektur('aufgeloest', t.schluessel, '1', 'Tour aufgelöst.');
+    case 'neu': {
+      const id = ziel.dataset.id;
+      const k = korrekturenAuswerten();
+      const liste = [];
+      if (k.ohne.has(id)) liste.push(['ohne', id, '']);
+      if (k.zu.has(id)) liste.push(['zu', id, '']);
+      liste.push(['neu', id, '1']);
+      tourKorrekturen(liste, 'Neue Tour angelegt. Füge jetzt die weiteren Etappen hinzu.').then(ok => { if (ok) tourOeffnen(id); });
       break;
+    }
     case 'entfernen': {
       const id = ziel.dataset.id;
       const e = tourenErgebnis();
@@ -687,18 +884,35 @@ document.addEventListener('click', ereignis => {
       break;
     }
     case 'hinzufuegen': {
-      const auswahl = document.querySelector('[data-tour-auswahl]');
-      if (!auswahl) return;
       const id = ziel.dataset.id;
-      const k = korrekturenAuswerten();
-      const weiter = () => tourKorrektur('zu', id, auswahl.value, 'Zur Tour hinzugefügt.');
-      if (k.ohne.has(id)) {
-        // „ohne“ zuerst aufheben, dann hinzufügen
-        tourKorrektur('ohne', id, '', 'Gespeichert.').then(weiter);
-      } else {
-        weiter();
+      if (ziel.dataset.tour) {
+        tourHinzufuegen(id, ziel.dataset.tour);
+        break;
       }
+      const auswahl = document.querySelector('[data-tour-auswahl]');
+      if (auswahl) tourHinzufuegen(id, auswahl.value);
       break;
     }
   }
+});
+
+// Felder „Bearbeiten“ speichern (nur geänderte)
+document.addEventListener('submit', ereignis => {
+  const form = ereignis.target.closest('[data-tour-form]');
+  if (!form) return;
+  ereignis.preventDefault();
+  const schluessel = form.dataset.tourForm;
+  const k = korrekturenAuswerten();
+  const daten = new FormData(form);
+  const liste = [];
+  ['name', 'von', 'nach'].forEach(art => {
+    const neu = String(daten.get(art) || '').trim();
+    if (neu !== (k[art].get(schluessel) || '')) liste.push([art, schluessel, neu]);
+  });
+  tourenZustand.bearbeiten = null;
+  if (!liste.length) {
+    zeichnen();
+    return;
+  }
+  tourKorrekturen(liste, 'Gespeichert.');
 });

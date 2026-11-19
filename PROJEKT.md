@@ -1,6 +1,6 @@
 # PROJEKT.md – Sport-Tracker (Arbeitstitel „sport")
 
-Version: 0.14.2 (2026-11-18) – v0.14 Fotos aus dem Fotoschatz
+Version: 0.15.0 (2026-11-19) – v0.15 Touren bearbeiten, gleiche Routen, Karte je Sportart
 
 Dieses Dokument ist die Grundlage für die Entwicklung mit Claude Code. Es beschreibt Ziele, Architektur, Arbeitsweise und Fahrplan. Claude Code liest es vor jeder Arbeit und hält es aktuell.
 
@@ -148,6 +148,9 @@ Epix / Tacho → Garmin Connect (unverändert)
 - **Orte unterwegs** (v0.13): Ortsliste `docs/daten/orte.txt` aus GeoNames cities1000 (CC BY 4.0): Schweiz/Liechtenstein ab 1000, IT/FR/DE/AT ab 3000, übriges Europa ab 10 000, Welt ab 100 000 Einwohnern (ca. 22 000 Orte, 330 KB gezippt), wird erst auf Tour-Seiten geladen. Kein Online-Dienst, die Spuren verlassen das Gerät nicht. Etappe „Start → Ziel, über …“ (bis 3 größte Orte im Umkreis von 1,5 km der Spur, ohne Orte bis 3 km um Start und Ziel); Tour „über …“ (5 größte Orte); automatischer Name aus erstem und letztem Punkt.
 - **Kartenwahl** (v0.13): grau / farbig / OpenStreetMap auf allen Karten, gespeichert im Gerät (`sport.grundkarte`); Detail- und Tour-Karte beginnen außerhalb der Schweiz mit OpenStreetMap.
 - **Fotoschatz-Verknüpfung** (entschieden 2026-11-18, v0.14, `docs/fotos.js`): Fotos aus dem Zeitraum einer Tour (1 h vor bis 3 h nach) bzw. einer Aktivität (±15 min) als Bildstreifen und als dezente, zusammengefasste Punkte auf der Karte (Ebene „Fotos“, abschaltbar), Betrachter mit Blättern, Link in den Fotoschatz. Quelle: `index-<Schlüssel>.json` aus R2 mit Christofs Fotoschatz-Link; der Link liegt nur im Gerät (`sport.fotoschatz`), im Browser übernehmbar aus `fotoschatz.links` (gleiche Herkunft), in der APK eingefügt. Verzeichnis im Cache, höchstens täglich neu. Link-Format `…/fotoschatz/?f=<Ordner>&b=<Bild-id>#<Link>`; die Auswertung von `f`/`b` muss im Fotoschatz-Repo gebaut werden (Prompt an Christof übergeben, diese Sitzung hat dort keinen Schreibzugriff). Android 0.14.0: Im WebView bleibt nur `/sport/`, der Fotoschatz öffnet im Browser.
+- **Touren bearbeiten und anlegen** (entschieden 2026-11-19, v0.15): Name, Start und Ziel änderbar; „Keine Tour“ merkt sich alle Etappen (Wert der Korrektur `aufgeloest`), damit die Tour auch nach geänderten Regeln nicht wiederkommt; Touren von Hand anlegen (Korrektur `neu`) und Aktivitäten der Tage davor und danach mit „+“ hinzufügen. Mehrtagestouren gibt es nur für Wandern und Rad. Wandern braucht 10 km Ausdehnung statt 20 km (2–3-tägige Wanderungen wurden nicht erkannt). „Mehrtagestour?“ in den Details zeigt den Grund, warum keine Tour erkannt wurde (nur im Gerät).
+- **Gleiche Routen mit Rangliste** (entschieden 2026-11-19, v0.15, `docs/routen.js`): ganze Aktivitäten, keine Teilstücke (Segmente). Gleich = Start und Ziel ≤ 300 m, Distanz ±10 %, Spur im Mittel ≤ 120 m daneben (40 Stichproben, höchstens 10 % weiter als 350 m), mindestens 2 Fahrten, Laufen/Rad/Wandern. Rangliste nach Garmins Bewegungszeit (`movingDuration`, Spalte `min`), damit Halte an der Ampel nicht zählen; Gesamtzeit daneben. Berechnung im Gerät.
+- **Karte je Sportart** (v0.15): Detail-, Tour- und Routen-Karte: Rad mit Velorouten (Schweiz: `ch.astra.veloland` von geo.admin.ch, sonst Waymarked Trails) bzw. außerhalb der Schweiz Grundkarte CyclOSM; Wandern mit Wanderwegen (Schweiz: swisstopo, sonst Waymarked Trails). Wahl je Sportart und Schweiz/Ausland gespeichert (`sport.karte.<sportart>.<ch|welt>`).
 - **Bestmarke Höhenmeter ohne Pistenski** (Garmin zählt die Liftfahrten mit), Skitouren zählen.
 - **Keine geschätzten Sportpunkte für unrealistische Aktivitäten** (nur echte Intensitätsminuten), seit Web-App 0.7.0.
 - **App ohne Build-Schritt:** schlichtes HTML/CSS/JavaScript in `/docs`, GitHub Pages veröffentlicht direkt.
@@ -259,9 +262,9 @@ Mehrteilige Spuren (nach dem Filter): Polylines durch ein Leerzeichen getrennt. 
 
 | Spalte | Inhalt |
 |---|---|
-| art | `name`, `aufgeloest`, `ohne`, `zu` |
-| schluessel | Tour (activityId der ersten erkannten Etappe) bzw. activityId |
-| wert | Name, `1` oder bei `zu` die Tour |
+| art | `name`, `aufgeloest`, `ohne`, `zu`; ab v0.15 `von`, `nach`, `neu`, `routenname` |
+| schluessel | Tour (activityId der ersten erkannten Etappe), activityId bzw. Route (activityId der ersten Fahrt) |
+| wert | Name/Ort, `1`, bei `zu` die Tour, bei `aufgeloest` (ab v0.15) die activityIds aller Etappen mit Komma (als Text gespeichert) |
 | geaendert | Zeitpunkt |
 
 Nur Korrekturen; die Touren selbst rechnet die App.
@@ -335,7 +338,7 @@ Die Web-App läuft als Christof („Ausführen als: Ich“) mit Zugriff „Jeder
 /gas/Touren.gs                  v0.12: Korrekturen an den Mehrtagestouren (Blatt „Touren“)
 /android/                       Android-App (Kotlin): MainActivity (WebView), Bruecke, PruefJob, Pruefung, Melder, Update, Netz, Speicher, Schritte
 /.github/workflows/android.yml  APK bauen, signieren, als Release „apk-<Laufnummer>“ veröffentlichen
-/docs/                          App auf GitHub Pages: index.html, app.js, form.js (Ansicht „Form“), karte.js (Karte), historie.js (Historie), touren.js (Mehrtagestouren), fotos.js (Fotoschatz), daten/orte.txt (Ortsliste GeoNames), hilfe.js (Erklärungen), style.css, sw.js, manifest.json, icons/
+/docs/                          App auf GitHub Pages: index.html, app.js, form.js (Ansicht „Form“), karte.js (Karte), historie.js (Historie), touren.js (Mehrtagestouren), routen.js (gleiche Routen), fotos.js (Fotoschatz), daten/orte.txt (Ortsliste GeoNames), hilfe.js (Erklärungen), style.css, sw.js, manifest.json, icons/
 /.github/workflows/deploy-gas.yml  Deployment nach Apps Script per clasp
 ```
 
@@ -460,6 +463,7 @@ Für v0.5: nichts einzurichten. Optional `webAppTesten` ausführen: loggt, wie v
 | v0.7 | Android-App: Hülle um die PWA, Benachrichtigungen (konfigurierbar), Updates über GitHub-Releases | Benachrichtigungen |
 | v0.8 | Schrittzähler des Handys: Diagnose, Blatt „Schritte“, Anzeige in Woche und Form | Bewegung im Alltag |
 | v0.9 | Alltagspunkte aus Schritten (einstellbar, ohne Schritte während Aktivitäten); Karte mit allen Spuren als Heatmap, Wanderwege-Ebene, Filter nach Sportart und Jahr, Spur in der Detailansicht, Historie nachladen | Ziel 5, Alltag zählt |
+| v0.15 | Touren bearbeiten, von Hand anlegen und als „keine Tour“ merken, „Mehrtagestour?“ mit Grund, Wanderungen über 2–3 Tage; gleiche Routen mit Rangliste (Bewegungszeit); Karte je Sportart (Velorouten, Wanderwege, Velokarte); Fotopunkte größer und anders als Etappen | Touren und Routen im Griff |
 | v0.14 | Fotos aus dem Fotoschatz auf Tour- und Aktivitätsseiten (Bildstreifen, Kartenpunkte, Betrachter, Link) | Erinnerungen mit Bildern |
 | v0.13 | Tour-Regeln nach echten Beispielen (keine Ferien-Standorte, keine Tagesausflüge ab Zuhause), Orte unterwegs, Kartenwahl auf allen Karten | Touren stimmen |
 | v0.12 | Mehrtagestouren: automatisch erkannt (Etappen, Pausentage, Ausflüge, Zug-Lücken, ohne Pendeln), Tour-Seite, in Historie, Details, Karte und Erfolgen; korrigierbar | Erinnerungen an Touren |
@@ -467,6 +471,9 @@ Für v0.5: nichts einzurichten. Optional `webAppTesten` ausführen: loggt, wie v
 | v0.10 | Feedback zu v0.9: Einstellungen neu gesetzt, Karte lädt beim Öffnen neu, Abgleich mit Garmin nach Zeitraum, Spuren besser sichtbar, Heatmap nach Häufigkeit, Detail-Karte größer mit Vollbild, Filter für Zug und GPS-Sprünge, persönliche Jahres-Abzeichen mit Hochrechnung, Höhenmeter ohne Pistenski | Karte und Abzeichen alltagstauglich |
 
 ### Ideen für später
+
+- Teilstücke (Segmente) wie bei Strava: gleiche Abschnitte innerhalb verschiedener Aktivitäten vergleichen (v0.15 vergleicht nur ganze Aktivitäten).
+- Große Karte: beim starken Hineinzoomen feine Spuren nachladen.
 
 - Erinnerung, z. B. Donnerstagabend „Diese Woche noch kein Lauf" (Mail oder Handy-Benachrichtigung).
 - Wochenrückblick am Sonntag mit Vergleich zur Vorwoche.
@@ -489,6 +496,7 @@ Für v0.5: nichts einzurichten. Optional `webAppTesten` ausführen: loggt, wie v
 
 | Version | Datum | Änderung |
 |---|---|---|
+| 0.15.0 | 2026-11-19 | v0.15 (Ideen von Christof): `docs/touren.js` 0.15.0 (Bearbeiten Name/Start/Ziel, „Keine Tour“ mit allen Etappen, Touren von Hand, „+“ für Aktivitäten ±3 Tage, „Mehrtagestour?“ mit Grund, Wandern 10 km Ausdehnung), `docs/routen.js` (neu: gleiche Routen, Rangliste, Routen-Seite), `docs/karte.js` 0.15.0 (Karte je Sportart, Velorouten, Velokarte, Waymarked Trails), `docs/fotos.js` 0.15.0 (Fotopunkte 28 px als blaue Quadrate mit Anzahl-Schild, Tippfläche 44 px), `docs/historie.js` 0.15.0 (Reiter „Routen“), `docs/app.js`, `docs/hilfe.js`, `docs/style.css`, `docs/sw.js`, `docs/index.html` 0.15.0; `gas/Touren.gs` 0.15.0 (Korrekturen `von`, `nach`, `neu`, `routenname`, Liste bei `aufgeloest`, Wert als Text), `gas/WebApp.gs` 0.15.0. Android unverändert |
 | 0.14.2 | 2026-11-18 | Feedback: Vorschaubilder machten die Karte zu voll. Jetzt kleine Punkte (Kamera-Symbol bzw. Anzahl, weiß mit blauem Rand, Tippfläche 36 px); Antippen öffnet ein Vorschaufenster auf der Karte mit Blättern, Bild antippen = groß; Kamera-Knopf „Fotos an/aus“ auf Tour- und Detail-Karte, Wahl gespeichert (`sport.fotosKarte`). `docs/fotos.js`, `docs/karte.js`, `docs/touren.js`, `docs/style.css`, `docs/hilfe.js` 0.14.2 |
 | 0.14.1 | 2026-11-18 | Feedback: Foto-Marker auf der Karte als Vorschaubilder (36 px, Zahl bei mehreren) statt kleiner Punkte (`docs/fotos.js`, `docs/style.css`); Tour-Karte lädt die feinen Spuren (5 m) der Etappen nach, vorher grob und eckig (`docs/touren.js`, `docs/karte.js` mit `feineSpurHolen`). Die große Karte bleibt bei groben Spuren (alle Spuren auf einmal) |
 | 0.14.0 | 2026-11-18 | v0.14 Fotoschatz: `docs/fotos.js` (neu), `docs/touren.js`, `docs/karte.js` (Ebene „Fotos“), `docs/app.js` (Detail, Einstellungen, Betrachter), `docs/style.css`, `docs/hilfe.js`, `docs/sw.js`, `docs/index.html` 0.14.0; `android/` 0.14.0 (nur `/sport/` im WebView). Apps Script unverändert |

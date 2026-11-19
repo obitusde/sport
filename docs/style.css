@@ -1,4 +1,4 @@
-/* style.css – Sport-App, Version 0.14.2 (2026-11-18) */
+/* style.css – Sport-App, Version 0.15.0 (2026-11-19) */
 
 :root {
   --hintergrund: #f6f5f2;
@@ -540,7 +540,7 @@ body.vollbild-aktiv { overflow: hidden; }
 }
 
 /* Touren (ab 0.12.0) */
-.umschalter { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 12px; background: var(--flaeche-2); margin: 4px 0 10px; }
+.umschalter { display: grid; grid-auto-columns: 1fr; grid-auto-flow: column; gap: 4px; padding: 4px; border-radius: 12px; background: var(--flaeche-2); margin: 4px 0 10px; }
 .umschalter button { font: inherit; font-weight: 600; border: 0; border-radius: 9px; padding: 8px; background: none; color: var(--text-2); cursor: pointer; }
 .umschalter button.an { background: var(--flaeche); color: var(--text); box-shadow: var(--schatten); }
 .historie-filter.nur-jahr { grid-template-columns: 1fr; }
@@ -568,6 +568,23 @@ body.vollbild-aktiv { overflow: hidden; }
 .tour-ueber { display: block; margin-top: 2px; }
 .tour-zeile .eintrag-name { white-space: normal; }
 
+/* Touren bearbeiten, „Mehrtagestour?“, gleiche Routen (ab 0.15.0) */
+.tour-plus { flex: none; margin-bottom: 6px; color: var(--akzent); font-size: 1.2rem; }
+.tour-warum { margin: 0 0 12px; font-size: 0.85rem; color: var(--text-2); }
+.tour-warum summary { cursor: pointer; padding: 4px 0; }
+.tour-warum p { margin: 4px 0 8px; }
+.tour-warum .knopfreihe { margin-bottom: 8px; }
+.tour-bearbeiten { display: grid; gap: 10px; margin-top: 12px; }
+.tour-feld { display: grid; gap: 4px; font-size: 0.85rem; color: var(--text-2); }
+.tour-feld input { font: inherit; font-size: 1rem; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--linie); background: var(--flaeche); color: var(--text); }
+.tour-feld input::placeholder { color: var(--text-2); opacity: 0.7; }
+.rang-platz {
+  flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+  background: var(--flaeche-2); color: var(--text-2); font-weight: 700; font-size: 0.85rem;
+}
+.rang-beste .rang-platz { background: var(--farbe, var(--akzent)); color: #fff; }
+.rang-eintrag .eintrag-name { white-space: normal; }
+
 /* Fotos aus dem Fotoschatz (ab 0.14.0) */
 .fotos-kopf { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .fotos-kopf a.knopf { flex: none; }
@@ -578,13 +595,18 @@ body.vollbild-aktiv { overflow: hidden; }
 .foto-punkt { background: none; border: 0; }
 .foto-punkt { display: grid !important; place-items: center; }
 .foto-kreis {
-  /* kleiner weißer Kreis mit blauem Rand in einer großen, unsichtbaren Tippfläche (36 px);
-     anders als die farbig gefüllten Etappen-Nummern */
-  display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 3px; box-sizing: border-box;
-  border-radius: 10px; background: #fff; border: 2px solid #1b5fc1; color: #1b5fc1;
-  font-size: 0.65rem; font-weight: 700; box-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
+  /* blaues abgerundetes Quadrat mit Kamera in einer Tippfläche von 44 px (ab 0.15.0);
+     anders als die runden, farbig gefüllten Etappen-Nummern */
+  position: relative; display: grid; place-items: center; width: 28px; height: 28px; box-sizing: border-box;
+  border-radius: 7px; background: #1b5fc1; border: 2px solid #fff; color: #fff;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.45);
 }
-.foto-kreis svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linejoin: round; }
+.foto-kreis svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linejoin: round; }
+.foto-anzahl {
+  position: absolute; top: -8px; right: -10px; min-width: 18px; height: 18px; padding: 0 4px; box-sizing: border-box;
+  border-radius: 9px; background: #fff; color: #1b5fc1; border: 1.5px solid #1b5fc1;
+  font-size: 0.65rem; font-weight: 700; line-height: 15px; text-align: center;
+}
 .foto-knopf { display: grid !important; place-items: center; color: #777; }
 .foto-knopf svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
 .foto-knopf.an { color: #1b5fc1; }

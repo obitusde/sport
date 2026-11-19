@@ -1,6 +1,6 @@
 /**
  * fotos.js – Fotos aus dem Fotoschatz in Touren und Aktivitäten
- * Version: 0.14.2 (2026-11-18)
+ * Version: 0.15.0 (2026-11-19)
  *
  * Der Fotoschatz (eigene App, obitusde/fotoschatz) legt Bilder und ein Inhaltsverzeichnis
  * index-<Schlüssel>.json in Cloudflare R2 ab. Jedes Foto hat Aufnahmezeit (t, lokal), Ordner
@@ -21,6 +21,9 @@
  *   mit × oder Tippen daneben. Kamera-Knopf „Fotos an/aus“ auf der Karte, Wahl gespeichert.
  * Link in den Fotoschatz: …/fotoschatz/?f=<Ordner>&b=<Bild-id>#<Link>. Ältere
  * Fotoschatz-Fassungen ignorieren ?f und ?b und öffnen die Ordnerliste.
+ * Änderungen 0.15.0 (Feedback: Fotopunkte größer, nicht mit den Etappen-Nummern verwechseln):
+ *   Fotos sind blaue abgerundete Quadrate mit Kamera (28 px, Tippfläche 44 px); mehrere Fotos
+ *   zeigen die Anzahl als kleines Schild in der Ecke. Etappen-Nummern bleiben runde Farbpunkte.
  */
 'use strict';
 
@@ -31,7 +34,7 @@ const FOTOS_SPEICHER = 'sport.fotoschatz';
 const FOTOS_STAND = 'sport.fotoschatz.stand';
 const FOTOS_CACHE_DATEI = 'fotoschatz-index.json';
 const FOTOS_ALTER_MS = 24 * 60 * 60 * 1000;
-const FOTO_PUNKT_RASTER = 48; // Pixel: Fotos näher beisammen werden ein Punkt mit Zahl
+const FOTO_PUNKT_RASTER = 56; // Pixel: Fotos näher beisammen werden ein Punkt mit Zahl
 const FOTOS_AUF_KARTE = 'sport.fotosKarte';
 const SYMBOL_KAMERA = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>';
 
@@ -238,7 +241,7 @@ function fotoEbene(karte, fotos) {
       const lo = liste.reduce((s, x) => s + x.p.lo, 0) / liste.length;
       const n = liste.length;
       L.marker([la, lo], {
-        icon: L.divIcon({ className: 'foto-punkt', html: `<span class="foto-kreis">${n > 1 ? n : SYMBOL_KAMERA}</span>`, iconSize: [36, 36] }),
+        icon: L.divIcon({ className: 'foto-punkt', html: `<span class="foto-kreis">${SYMBOL_KAMERA}${n > 1 ? `<span class="foto-anzahl">${n}</span>` : ''}</span>`, iconSize: [44, 44] }),
         keyboard: false, riseOnHover: true, title: n > 1 ? n + ' Fotos' : 'Foto'
       }).on('click', () => fotoVorschau(karte, [la, lo], fotos, liste.map(x => x.i), 0)).addTo(ebene);
     });

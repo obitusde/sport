@@ -1,6 +1,6 @@
 /**
  * hilfe.js – Erklär-Seite „So funktioniert die App“
- * Version: 0.14.2 (2026-11-18)
+ * Version: 0.15.0 (2026-11-19)
  *
  * Erreichbar über das „?“ in „Form“ und „Erfolge“ sowie über die Einstellungen.
  * Werte wie Ziele und Grenzen werden aus app.js gelesen, damit der Text stimmt,
@@ -95,15 +95,21 @@ function ansichtHilfe() {
       <p>Tippst du auf eine Linie, werden alle Routen an dieser Stelle <b>gelb markiert</b>. In der Liste darunter markiert ein Tippen eine einzelne Route; dort stehen auch Distanz, Dauer und Höhenmeter auf (↑) und ab (↓).</p>
       <p>Weit herausgezoomt werden die Linien breiter und jede Route bekommt einen <b>Punkt</b>, damit du auch kurze Touren findest. Beim Hineinzoomen verschwinden die Punkte.</p>
       <p>Das Symbol mit den vier Ecken öffnet die Karte im <b>Vollbild</b>; die Zurück-Taste schließt es.</p>
-      <p>Über das Symbol oben rechts in der Karte blendest du die <b>offiziellen Wanderwege der Schweiz</b> (swisstopo) ein: So siehst du, wo es Wege gibt, auf denen du noch nicht warst. Als Grundkarte gibt es die Landeskarte von swisstopo oder OpenStreetMap.</p>
+      <p>Über das Symbol oben rechts in der Karte blendest du die <b>offiziellen Wanderwege und Velorouten der Schweiz</b> (swisstopo, ASTRA) ein: So siehst du, wo es Wege gibt, auf denen du noch nicht warst. Als Grundkarte gibt es die Landeskarte von swisstopo, OpenStreetMap oder die Velokarte (CyclOSM).</p>
+      <p><b>Karte je Sportart:</b> Die Karte einer Aktivität, Tour oder Route passt sich an: Radfahrten zeigen die Velorouten (außerhalb der Schweiz die Velokarte), Wanderungen die Wanderwege (außerhalb der Schweiz von Waymarked Trails). Was du dort umstellst, merkt sich die App je Sportart.</p>
       <p>Die Spuren kommen aus den Originaldateien der Uhr (FIT), bei älteren oder importierten Aktivitäten aus GPX- oder TCX-Dateien. Beim ersten Mal lädt die App die ganze Historie im Hintergrund nach; das kann ein paar Stunden dauern. Unrealistische Aktivitäten (z. B. Autofahrt mit laufender Aufzeichnung) erscheinen nicht.</p>`)}
 
     ${abschnitt('Historie', `
       <p>Unter „Historie“ findest du alle Aktivitäten seit Beginn. Die Suche durchsucht Name, Ort, Sportart, Jahr und Monat (Umlaute egal, mehrere Wörter möglich, z. B. „Leytron 2025“).</p>
       <p>Filtern kannst du nach Sportart (mehrere wählbar), Jahr, Länge und Ort (Garmins Ortsname, Orte ab zwei Aktivitäten), sortieren nach Datum, Distanz, Höhenmeter oder Dauer. Oben steht die Summe der Treffer. Tippen öffnet die Details, „Zurück“ führt an dieselbe Stelle der Liste.</p>`)}
 
+    ${abschnitt('Gleiche Routen und Rangliste', `
+      <p>Läufe, Radfahrten und Wanderungen auf <b>derselben Strecke</b> (z. B. der Arbeitsweg) fasst die App zu einer Route zusammen: Start und Ziel liegen höchstens 300 m auseinander, die Distanz weicht höchstens 10 % ab und die Spur liegt fast überall nah an der ersten Fahrt. Kleine Umwege sind erlaubt. Hin- und Rückweg sind zwei Routen.</p>
+      <p>Die <b>Rangliste</b> vergleicht die Bewegungszeit von Garmin: Halte, z. B. an der Ampel, zählen nicht, damit der Vergleich fair ist. Die Gesamtzeit mit Halten steht grau daneben. Garmin liefert die Zeit auf 6 Sekunden genau.</p>
+      <p>Routen findest du unter Historie → „Routen“ und in den Details jeder Aktivität („Gleiche Route, 14× gemacht · Platz 3“). Den Namen kannst du ändern. Alles wird im Handy berechnet.</p>`)}
+
     ${abschnitt('Mehrtagestouren', `
-      <p>Die App erkennt Wander- und Radtouren über mehrere Tage automatisch: Eine <b>Etappe</b> beginnt ungefähr dort (bis 3 km), wo die vorherige aufgehört hat, mit höchstens 2 Pausentagen dazwischen. Eine Tour hat nur eine Sportart, mindestens zwei Etappen an verschiedenen Tagen, mindestens <b>eine Übernachtung unterwegs</b> und entfernt sich am Stück mindestens 20 km vom Start.</p>
+      <p>Die App erkennt Wander- und Radtouren über mehrere Tage automatisch (andere Sportarten nicht): Eine <b>Etappe</b> beginnt ungefähr dort (bis 3 km), wo die vorherige aufgehört hat, mit höchstens 2 Pausentagen dazwischen. Eine Tour hat nur eine Sportart, mindestens zwei Etappen an verschiedenen Tagen, mindestens <b>eine Übernachtung unterwegs</b> und entfernt sich am Stück mindestens 10 km (Wandern) bzw. 20 km (Rad) Luftlinie vom Start.</p>
       <p>Keine Tour sind: Ausflüge, zwischen denen du <b>zu Hause</b> geschlafen hast (Start und Ende einer Tour dürfen zu Hause liegen), und Ferien an einem <b>Standort</b> (mehr als zwei Nächte am selben Ort).</p>
       <ul>
         <li><b>Ausflug:</b> eine Rundtour am Etappenort, z. B. wenn du zweimal am selben Ort übernachtest.</li>
@@ -112,10 +118,11 @@ function ansichtHilfe() {
       </ul>
       <p><b>Orte:</b> Start und Ziel jeder Etappe und die größeren Orte unterwegs („über …“) kommen aus einer Ortsliste in der App (GeoNames, CC BY 4.0). Deine Spuren verlassen dafür das Handy nicht. Die Karte lässt sich oben rechts umschalten; außerhalb der Schweiz beginnt sie mit OpenStreetMap.</p>
       <p>Touren findest du unter Historie → „Touren“, in den Erfolgen und auf der Karte (Filter „Nur Touren“). Die Tour-Seite zeigt alle Etappen auf einer Karte, jeden Tag in einer eigenen Farbe, dazu Summen und die Etappenliste mit Pausentagen.</p>
-      <p><b>Korrigieren:</b> Auf der Tour-Seite umbenennen, mit „×“ eine Aktivität herausnehmen oder die ganze Tour auflösen. Fehlt eine Aktivität, öffne sie und tippe auf „Zu Tour hinzufügen“. Die Korrekturen gelten auf allen Geräten.</p>`)}
+      <p><b>Korrigieren:</b> Auf der Tour-Seite unter „Bearbeiten“ Name, Start und Ziel ändern. Mit „×“ nimmst du eine Aktivität heraus, mit „+“ fügst du eine aus den Tagen davor und danach hinzu. <b>„Keine Tour“</b> entfernt eine falsch erkannte Tour und merkt sich das, damit sie nicht wieder vorgeschlagen wird.</p>
+      <p><b>Fehlt eine Tour?</b> Öffne eine ihrer Aktivitäten und tippe auf „Mehrtagestour?“. Dort steht, warum die App keine Tour erkannt hat (z. B. „begann 4,2 km vom Ende am Vortag entfernt“), und du kannst mit „Neue Tour mit dieser Wanderung“ selbst eine anlegen und dann die übrigen Etappen mit „+“ hinzufügen. Die Korrekturen gelten auf allen Geräten.</p>`)}
 
     ${abschnitt('Fotos aus dem Fotoschatz', `
-      <p>Ist der Fotoschatz verbunden (Optionen → Fotoschatz), zeigt die App Fotos aus dem Zeitraum einer Tour bzw. während einer Aktivität: als schmalen Bildstreifen unter der Karte und als kleine Punkte mit Kamera-Symbol (bzw. Anzahl) auf der Karte. Ein Punkt öffnet ein Vorschaufenster auf der Karte, bei mehreren Fotos mit ‹ › zum Blättern; × oder Tippen daneben schließt es, Tippen aufs Bild zeigt es groß. Der Kamera-Knopf links auf der Karte blendet die Fotos ein und aus. Im großen Bild blättert Wischen, „Fotoschatz“ öffnet es dort.</p>
+      <p>Ist der Fotoschatz verbunden (Optionen → Fotoschatz), zeigt die App Fotos aus dem Zeitraum einer Tour bzw. während einer Aktivität: als schmalen Bildstreifen unter der Karte und als blaue Quadrate mit Kamera auf der Karte (bei mehreren Fotos mit der Anzahl in der Ecke; die runden Punkte mit Zahl sind die Etappen). Ein Punkt öffnet ein Vorschaufenster auf der Karte, bei mehreren Fotos mit ‹ › zum Blättern; × oder Tippen daneben schließt es, Tippen aufs Bild zeigt es groß. Der Kamera-Knopf links auf der Karte blendet die Fotos ein und aus. Im großen Bild blättert Wischen, „Fotoschatz“ öffnet es dort.</p>
       <p>Der Fotoschatz-Link wird nur auf diesem Gerät gespeichert. Im Browser lässt er sich aus dem Fotoschatz übernehmen, in der Android-App wird er einmal eingefügt. Das Verzeichnis der Fotos lädt die App höchstens einmal am Tag neu.</p>`)}
 
     ${abschnitt('Mit Garmin abgleichen', `

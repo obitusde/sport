@@ -1,6 +1,6 @@
 /**
  * app.js – Sport-App
- * Version: 0.14.2 (2026-11-18)
+ * Version: 0.15.0 (2026-11-19)
  *
  * Ansichten: Woche, Einstellungen.
  * Die App holt die Aktivitäten als Liste von der Apps-Script-Web-App und rechnet
@@ -52,10 +52,12 @@
  * allen Karten (karte.js).
  * Änderungen 0.14.0: Fotos aus dem Fotoschatz (fotos.js) in Detailansicht und Tour-Seite,
  * Abschnitt „Fotoschatz“ in den Einstellungen, Bildbetrachter (Zurück-Taste schließt ihn).
+ * Änderungen 0.15.0: Unterseite „route“ (gleiche Routen mit Rangliste, routen.js); in der
+ * Detailansicht Hinweis auf die Route und „Mehrtagestour?“ (touren.js).
  */
 'use strict';
 
-const APP_VERSION = '0.14.2';
+const APP_VERSION = '0.15.0';
 
 const SPEICHER = {
   url: 'sport.url',
@@ -112,13 +114,14 @@ const zustand = {
   verlauf: [],           // Stapel der Unterseiten: [{ansicht, detailId, tourSchluessel, scroll}]
   detailId: null,
   tourSchluessel: null,
+  routeSchluessel: null,
   detailLaedt: false,
   detailFehler: null,
   abgleich: { von: null, bis: null, laedt: false, ergebnis: null, fehler: null },
   wartung: { laedt: null, ergebnis: null, fehler: null }
 };
 
-const UNTERSEITEN = ['detail', 'hilfe', 'tour'];
+const UNTERSEITEN = ['detail', 'hilfe', 'tour', 'route'];
 
 // ---------------------------------------------------------------------------
 // Speicher (localStorage kann fehlen oder gesperrt sein)
@@ -1563,7 +1566,7 @@ function gespeicherteDetails() {
 
 /** Merkt sich die aktuelle Ansicht, damit „Zurück“ dorthin führt. */
 function unterseiteOeffnen(ansicht, zustandFuerHistory) {
-  zustand.verlauf.push({ ansicht: zustand.ansicht, detailId: zustand.detailId, tourSchluessel: zustand.tourSchluessel, scroll: window.scrollY });
+  zustand.verlauf.push({ ansicht: zustand.ansicht, detailId: zustand.detailId, tourSchluessel: zustand.tourSchluessel, routeSchluessel: zustand.routeSchluessel, scroll: window.scrollY });
   zustand.ansicht = ansicht;
   history.pushState(zustandFuerHistory, '');
   window.scrollTo(0, 0);
@@ -1620,6 +1623,7 @@ function ansichtDetail() {
     <span class="leise">${esc(SPORT_NAME[a.sportart] || a.sportart)} · ${datumText}${d.ort ? ' · ' + esc(d.ort) : ''}</span></div>
   </header>`;
 
+  html += routeHinweisHtml(a);
   html += tourHinweisHtml(a);
 
   if (a.unplausibel) {
@@ -1717,12 +1721,13 @@ function zeichnen() {
   const inhalt = document.getElementById('inhalt');
   const ansichten = {
     einstellungen: ansichtEinstellungen, erfolge: ansichtErfolge, form: ansichtForm, karte: ansichtKarte,
-    detail: ansichtDetail, hilfe: ansichtHilfe, woche: ansichtWoche, historie: ansichtHistorie, tour: ansichtTour
+    detail: ansichtDetail, hilfe: ansichtHilfe, woche: ansichtWoche, historie: ansichtHistorie, tour: ansichtTour, route: ansichtRoute
   };
   inhalt.innerHTML = (ansichten[zustand.ansicht] || ansichtWoche)();
   if (zustand.ansicht === 'karte') karteNachZeichnen();
   if (zustand.ansicht === 'detail' && zustand.detailId) detailKarteNachZeichnen(zustand.detailId);
   if (zustand.ansicht === 'tour') tourKarteNachZeichnen();
+  if (zustand.ansicht === 'route') routeKarteNachZeichnen();
   // Detail und Erklärungen gehören zur Ansicht, aus der sie geöffnet wurden
   const basis = UNTERSEITEN.indexOf(zustand.ansicht) >= 0 ? zustand.verlauf.find(v => UNTERSEITEN.indexOf(v.ansicht) < 0) : null;
   const reiter = basis ? basis.ansicht : zustand.ansicht;
@@ -1884,6 +1889,7 @@ window.addEventListener('popstate', () => {
     zustand.ansicht = v.ansicht;
     zustand.detailId = v.detailId;
     zustand.tourSchluessel = v.tourSchluessel;
+    zustand.routeSchluessel = v.routeSchluessel;
     zeichnen();
     window.scrollTo(0, v.scroll || 0);
   }

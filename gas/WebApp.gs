@@ -1,6 +1,6 @@
 /**
  * WebApp.gs – Schnittstelle für die App (JSON)
- * Version: 0.12.0 (2026-11-18)
+ * Version: 0.15.0 (2026-11-19)
  *
  * Aufruf: GET <webapp-url>?token=<WEBAPP_TOKEN>&aktion=<aktion>&...
  *
@@ -53,9 +53,10 @@
  *   der Spalte „details“. Aktion „wartung“: startet eine feste Auswahl von Diagnosen und
  *   Einrichtungen (WARTUNG) und liefert deren Protokoll, damit dafür kein PC nötig ist.
  * Änderungen 0.12.0: Aktionen „touren“ und „tourSetzen“ (Touren.gs).
+ * Änderungen 0.15.0: tourSetzen kennt die Korrekturen von, nach, neu und routenname (Touren.gs).
  */
 
-const WEBAPP_VERSION = '0.12.0';
+const WEBAPP_VERSION = '0.15.0';
 
 /**
  * Wartung aus der App: nur diese Funktionen sind erlaubt. Alle loggen nur Zählungen.

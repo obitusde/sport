@@ -1,6 +1,6 @@
 /**
  * Touren.gs – Korrekturen an den automatisch erkannten Mehrtagestouren
- * Version: 0.12.0 (2026-11-18)
+ * Version: 0.15.0 (2026-11-19)
  *
  * Die Touren selbst erkennt die App (docs/touren.js) aus Datum, Sportart und Start- und
  * Endpunkt der Spuren. Hier liegen nur die Korrekturen von Christof, damit sie auf allen
@@ -8,9 +8,16 @@
  *
  *   art          schluessel                     wert
  *   name         Tour (activityId der 1. Etappe)  Name der Tour
- *   aufgeloest   Tour                           „1“ = Tour nicht anzeigen
+ *   aufgeloest   Tour                           „keine Tour“: „1“ oder (ab 0.15.0) die
+ *                                               activityIds aller Etappen, mit Komma
  *   ohne         activityId                     „1“ = Aktivität gehört nie zu einer Tour
  *   zu           activityId                     Tour, zu der die Aktivität von Hand gehört
+ *   von          Tour                           Startort (statt des automatischen)       ab 0.15.0
+ *   nach         Tour                           Zielort (statt des automatischen)        ab 0.15.0
+ *   neu          activityId                     „1“ = von Hand angelegte Tour, beginnt   ab 0.15.0
+ *                                               mit dieser Aktivität
+ *   routenname   Route (activityId der ersten   Name einer gleichen Route (routen.js)    ab 0.15.0
+ *                Fahrt)
  *
  * Aktionen der Web-App: touren (alle Korrekturen), tourSetzen (art, schluessel, wert;
  * leerer wert löscht die Korrektur).
@@ -18,7 +25,7 @@
 
 const BLATT_TOUREN = 'Touren';
 const TOUREN_SPALTEN = ['art', 'schluessel', 'wert', 'geaendert'];
-const TOUREN_ARTEN = ['name', 'aufgeloest', 'ohne', 'zu'];
+const TOUREN_ARTEN = ['name', 'aufgeloest', 'ohne', 'zu', 'von', 'nach', 'neu', 'routenname'];
 
 function tourenBlatt_() {
   const ss = tabelle_();
@@ -49,7 +56,12 @@ function tourSetzen_(p) {
   const wert = String(p.wert === undefined || p.wert === null ? '' : p.wert).trim();
   if (TOUREN_ARTEN.indexOf(art) < 0) throw new Error('unbekannte Korrektur: ' + art);
   if (!/^\d+$/.test(schluessel)) throw new Error('ungültiger Schlüssel');
-  if (wert.length > 100) throw new Error('Text zu lang (höchstens 100 Zeichen)');
+  if (art === 'aufgeloest') {
+    if (wert && !/^\d+(,\d+)*$/.test(wert)) throw new Error('ungültige Liste');
+    if (wert.length > 2000) throw new Error('Liste zu lang');
+  } else if (wert.length > 100) {
+    throw new Error('Text zu lang (höchstens 100 Zeichen)');
+  }
   if (art === 'zu' && wert && !/^\d+$/.test(wert)) throw new Error('ungültige Tour');
 
   const lock = LockService.getScriptLock();
@@ -64,11 +76,15 @@ function tourSetzen_(p) {
     }
     if (!wert) {
       if (zeile) b.deleteRow(zeile);
-    } else if (zeile) {
-      b.getRange(zeile, 3, 1, 2).setValues([[wert, new Date()]]);
     } else {
-      b.getRange(b.getLastRow() + 1, 1, 1, 4).setValues([[art, schluessel, wert, new Date()]]);
-      b.getRange(b.getLastRow(), 2).setNumberFormat('0');
+      if (!zeile) {
+        zeile = b.getLastRow() + 1;
+        b.getRange(zeile, 1, 1, 2).setValues([[art, schluessel]]);
+        b.getRange(zeile, 2).setNumberFormat('0');
+      }
+      // Wert als reiner Text, sonst macht Sheets aus „123,456“ eine Zahl
+      b.getRange(zeile, 3).setNumberFormat('@');
+      b.getRange(zeile, 3, 1, 2).setValues([[wert, new Date()]]);
     }
   } finally {
     lock.releaseLock();
